@@ -4,6 +4,7 @@ import threading
 import time
 from typing import Tuple
 
+import gym
 import numpy as np
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -464,6 +465,17 @@ class SpaceBot(Robot):
         else:
             return 0.0, False
 
+    def reset(self):
+        self.rolling_average_acceleration.reset()
+
+        if self.action_use_combined_scheme:
+            self.gait_controller.reset()
+            self._is_action_being_replayed = 0.0
+            self._is_agent_ready = False
+
+        if self.is_training:
+            self.trainer.reset()
+
 class Trainer(Supervisor):
     ## Constants taken from the supervisor
     ROBOT_MIN_Z: float = 0.9
@@ -686,3 +698,137 @@ class Trainer(Supervisor):
 
         self._previous_reward = reward
         return reward, False
+
+
+class ParticipantEnv(gym.Env):
+    def __init__(self, train: bool = TRAIN, **kwargs):
+        self.robot = SpaceBot(train=train, **kwargs)
+
+    @property
+    def observation_space(self):
+        if self.robot.observation_vector_enable:
+            vector_obs = gym.spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(self.robot.observation_vector_size,),
+                dtype=np.float32,
+            )
+        if self.robot.observation_image_enable:
+            image_obs = gym.spaces.Box(
+                low=0,
+                high=255,
+                shape=(
+                    self.robot.observation_image_height,
+                    self.robot.observation_image_width,
+                    self.robot.observation_image_channels,
+                ),
+                dtype=np.uint8,
+            )
+
+        if self.robot.observation_vector_enable and self.robot.observation_image_enable:
+            return gym.spaces.Dict(
+                spaces={
+                    "vector": vector_obs,
+                    "image": image_obs,
+                }
+            )
+        elif self.robot.observation_vector_enable:
+            return vector_obs
+        elif self.robot.observation_image_enable:
+            return image_obs
+
+    @property
+    def action_space(self):
+        if self.robot.action_use_combined_scheme:
+            n_actions = (
+                self.robot.action_gait_controller_input_size
+                + self.robot.action_replay_controller_input_size
+                + self.robot.head_controllers.input_size
+                + self.robot.hand_controllers.input_size_combined
+                + self.robot.arm_controllers.input_size
+            )
+            return gym.spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(n_actions,),
+                dtype=np.float32,
+            )
+        elif self.robot.action_use_only_replay_motion:
+            return gym.spaces.Discrete(self.robot.action_replay_motion_size)
+        else:
+            if self.robot.action_leds_enable:
+                n_actions = (
+                    self.robot.joint_controllers.input_size
+                    + self.robot.led_controllers.input_size
+                )
+            else:
+                n_actions = self.robot.joint_controllers.input_size
+            return gym.spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(n_actions,),
+                dtype=np.float32,
+            )
+
+    @property
+    def reward_range(self):
+        # Note: Approximate values, +-50.0 is more realistic with the current defaults
+        return (-100.0, 100.0)
+
+    def step(self, action):
+        self.robot.apply_action(action)
+        obs = self.robot.get_observations()
+        reward, is_done = self.robot.get_reward()
+        info = {}
+        return obs, reward, is_done, info
+
+    def reset(self):
+        self.robot.reset()
+        return self.robot.get_observations()
+
+    def render(self, mode="human"):
+        if mode == "human":
+            pass
+        elif mode == "rgb_array":
+            return self.robot.cameras.get_image_rgb()
+        else:
+            raise NotImplementedError
+
+    def _random_agent(self, debug: bool = DEBUG):
+        self.reset()
+        while True:
+            if self.robot.action_use_only_replay_motion:
+                action = np.random.randint(0, self.robot.action_replay_motion_size)
+            else:
+                action = np.random.uniform(
+                    -1,
+                    1,
+                    size=self.action_space.shape,
+                )
+
+            observations, reward, done, info = self.step(action)
+
+            if debug:
+                if isinstance(observations, dict):
+                    if "vector" in observations:
+                        print(f"observations_vector: {observations['vector']}")
+                        print(
+                            f"observations_vector.shape: {observations['vector'].shape}"
+                        )
+                    if "image" in observations:
+                        import cv2
+
+                        cv2.imshow("image_obs", observations["image"])
+                        cv2.waitKey(1)
+                        print(
+                            f"observations_image.shape: {observations['image'].shape}"
+                        )
+                else:
+                    print(f"observations: {observations}")
+                print(f"reward: {reward}")
+                print(f"done: {done}")
+
+
+if __name__ == "__main__":
+    wrestler = ParticipantEnv(train=TRAIN)
+    wrestler._random_agent()

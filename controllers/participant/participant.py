@@ -181,7 +181,10 @@ class SpaceBot(Robot):
 
             # Replay controller
             #   1 Action: (positive values: get_up_front, negative values: get_up_back)
-            self.replay_controller = ReplayMotionController()
+            self.replay_controller = ReplayMotionController(
+                motion_list=("GetUpFront", "GetUpBack", "Stand"),
+                motion_list_reverse=(),
+            )
             self._is_action_being_replayed = 0.0
             self.action_replay_controller_input_size = 1
             self.action_replay_controller_indices = [
@@ -291,22 +294,34 @@ class SpaceBot(Robot):
             if self.step(self.time_step) == -1:
                 break
 
-            ## Only play gait if the agent is ready and no action is being replayed
-            if self._is_action_being_replayed != 0.0:
-                if self.replay_controller.current_motion[1].isOver():
+            ## Until the agent is ready, perform manual actions
+            # self.replay_controller.set_wait_until_finished(self._is_agent_ready)
+            # TODO: Emulate the start-up behaviour during training
+            if not self._is_agent_ready:
+                if self._is_action_being_replayed == 0.0:
+                    self.replay_controller.play_motion_by_name("Stand")
+                    self._is_action_being_replayed = 1.0
+                elif self.replay_controller.current_motion[1].isOver():
                     self._is_action_being_replayed = 0.0
+                # Note: This must be disabled based on the motion being played
+                self._set_defensive_position()
             else:
-                self.gait_controller.set_step_amplitude(self.gait_step_amplitude)
-                self.gait_controller.command_to_motors(
-                    desired_radius=self.gait_desired_radius,
-                    heading_angle=self.gait_heading_angle,
-                )
+                ## Only play gait if the agent is ready and no action is being replayed
+                if self._is_action_being_replayed != 0.0:
+                    if self.replay_controller.current_motion[1].isOver():
+                        self._is_action_being_replayed = 0.0
+                else:
+                    self.gait_controller.set_step_amplitude(self.gait_step_amplitude)
+                    self.gait_controller.command_to_motors(
+                        desired_radius=self.gait_desired_radius,
+                        heading_angle=self.gait_heading_angle,
+                    )
 
-                self._set_default_pose_of_passive_joints()
+                    self._set_default_pose_of_passive_joints()
 
-            ## Change hue of the LEDs
-            self.led_hue = (self.led_hue + self.LED_HUE_DELTA) % 1.0
-            self.led_controllers.set_color_hsv(self.led_hue, 1.0, 1.0)
+                ## Change hue of the LEDs
+                self.led_hue = (self.led_hue + self.LED_HUE_DELTA) % 1.0
+                self.led_controllers.set_color_hsv(self.led_hue, 1.0, 1.0)
 
             ## Wait for the time step to finish
             time_to_sleep = self.TIME_STEP - (time.time() - time_before)
@@ -477,7 +492,132 @@ class SpaceBot(Robot):
             self.trainer.reset()
 
     def _init_static_joints(self):
-        pass
+        self.__ControllerHeadPitch = ControllerHeadPitch(
+            robot=self, time_step=self.time_step
+        )
+        # self.__ControllerHeadYaw = ControllerHeadYaw(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLElbowYaw = ControllerLElbowYaw(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLWristYaw = ControllerLWristYaw(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLHipYawPitch = ControllerLHipYawPitch(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLAnkleRoll = ControllerLAnkleRoll(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRElbowYaw = ControllerRElbowYaw(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRWristYaw = ControllerRWristYaw(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRHipYawPitch = ControllerRHipYawPitch(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRAnkleRoll = ControllerRAnkleRoll(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx1 = ControllerLPhalanx1(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx2 = ControllerLPhalanx2(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx3 = ControllerLPhalanx3(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx4 = ControllerLPhalanx4(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx5 = ControllerLPhalanx5(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx6 = ControllerLPhalanx6(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx7 = ControllerLPhalanx7(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerLPhalanx8 = ControllerLPhalanx8(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx1 = ControllerRPhalanx1(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx2 = ControllerRPhalanx2(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx3 = ControllerRPhalanx3(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx4 = ControllerRPhalanx4(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx5 = ControllerRPhalanx5(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx6 = ControllerRPhalanx6(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx7 = ControllerRPhalanx7(
+        #     robot=self, time_step=self.time_step
+        # )
+        # self.__ControllerRPhalanx8 = ControllerRPhalanx8(
+        #     robot=self, time_step=self.time_step
+        # )
+        self._set_default_pose_of_passive_joints()
+
+    def _set_default_pose_of_passive_joints(self):
+        self.__ControllerHeadPitch.set_joint_position_normalized(0.333)
+        # self.__ControllerHeadYaw.set_joint_position_normalized(0.0)
+        # self.__ControllerLElbowYaw.set_joint_position_normalized(0.0)
+        # self.__ControllerLWristYaw.set_joint_position_normalized(0.0)
+        # self.__ControllerLHipYawPitch.set_joint_position_normalized(0.0)
+        # self.__ControllerLAnkleRoll.set_joint_position_normalized(0.0)
+        # self.__ControllerRElbowYaw.set_joint_position_normalized(0.0)
+        # self.__ControllerRWristYaw.set_joint_position_normalized(0.0)
+        # self.__ControllerRHipYawPitch.set_joint_position_normalized(0.0)
+        # self.__ControllerRAnkleRoll.set_joint_position_normalized(0.0)
+        # self.__ControllerLPhalanx1.set_joint_position_normalized(1.0)
+        # self.__ControllerLPhalanx2.set_joint_position_normalized(1.0)
+        # self.__ControllerLPhalanx3.set_joint_position_normalized(1.0)
+        # self.__ControllerLPhalanx4.set_joint_position_normalized(1.0)
+        # self.__ControllerLPhalanx5.set_joint_position_normalized(1.0)
+        # self.__ControllerLPhalanx6.set_joint_position_normalized(1.0)
+        # self.__ControllerLPhalanx7.set_joint_position_normalized(-1.0)
+        # self.__ControllerLPhalanx8.set_joint_position_normalized(-1.0)
+        # self.__ControllerRPhalanx1.set_joint_position_normalized(1.0)
+        # self.__ControllerRPhalanx2.set_joint_position_normalized(1.0)
+        # self.__ControllerRPhalanx3.set_joint_position_normalized(1.0)
+        # self.__ControllerRPhalanx4.set_joint_position_normalized(1.0)
+        # self.__ControllerRPhalanx5.set_joint_position_normalized(1.0)
+        # self.__ControllerRPhalanx6.set_joint_position_normalized(1.0)
+        # self.__ControllerRPhalanx7.set_joint_position_normalized(-1.0)
+        # self.__ControllerRPhalanx8.set_joint_position_normalized(-1.0)
+
+    def _set_defensive_position(self):
+        self._set_default_pose_of_passive_joints()
+        if hasattr(self, "arm_controllers"):
+            self.arm_controllers.set_joint_position_normalized(
+                [
+                    0.2,
+                    -1.0,
+                    -1.0,
+                    0.2,
+                    1.0,
+                    1.0,
+                    -0.85,
+                    -0.1,
+                    0.85,
+                    0.1,
+                ],
+            )
+
 
 class Trainer(Supervisor):
     ## Constants taken from the supervisor

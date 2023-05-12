@@ -977,6 +977,20 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
     from dreamerv3 import embodied
     from embodied.envs import from_gym
 
+    ## Apply monkey patch to accommodate multiple agents running in parallel
+    if train:
+        XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.38"
+        __monkey_patch__setup_original = dreamerv3.Agent._setup
+
+        def __monkey_patch__setup(self):
+            __monkey_patch__setup_original(self)
+            os.environ[
+                "XLA_PYTHON_CLIENT_MEM_FRACTION"
+            ] = XLA_PYTHON_CLIENT_MEM_FRACTION
+
+        dreamerv3.Agent._setup = __monkey_patch__setup
+        ##
+
     config = embodied.Config(dreamerv3.configs["defaults"])
     config = config.update(dreamerv3.configs["small"])
     config = config.update(

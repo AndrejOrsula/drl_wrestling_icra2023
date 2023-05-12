@@ -476,6 +476,9 @@ class SpaceBot(Robot):
         if self.is_training:
             self.trainer.reset()
 
+    def _init_static_joints(self):
+        pass
+
 class Trainer(Supervisor):
     ## Constants taken from the supervisor
     ROBOT_MIN_Z: float = 0.9

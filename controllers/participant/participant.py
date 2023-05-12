@@ -832,6 +832,94 @@ class ParticipantEnv(gym.Env):
                 print(f"done: {done}")
 
 
+def dreamerv3(train: bool = TRAIN, **kwargs):
+    import dreamerv3
+    from dreamerv3 import embodied
+    from embodied.envs import from_gym
+
+    config = embodied.Config(dreamerv3.configs["defaults"])
+    config = config.update(dreamerv3.configs["small"])
+    config = config.update(
+        {
+            "logdir": os.path.join(
+                os.path.abspath(os.path.dirname(__file__)), "logdir"
+            ),
+            "batch_size": 16,
+            "imag_horizon": 15,
+            "run.train_ratio": 1024,
+            "run.log_every": 300,
+            "encoder.mlp_keys": "vector",
+            "decoder.mlp_keys": "vector",
+            "encoder.cnn_keys": "image",
+            "decoder.cnn_keys": "image",
+            # "encoder.mlp_keys": ".*",
+            # "decoder.mlp_keys": ".*",
+            # "encoder.cnn_keys": "$^",
+            # "decoder.cnn_keys": "$^",
+            "rssm.deter": 1024,
+            # "jax.platform": "cpu",
+            # "jax.jit": False,
+            "jax.prealloc": train,
+            "jax.precision": "float16",
+        }
+    )
+    if not train:
+        config = config.update(
+            {
+                "run.from_checkpoint": os.path.join(
+                    os.path.abspath(os.path.dirname(__file__)),
+                    "models",
+                    "model00.ckpt",
+                ),
+            }
+        )
+
+    config = embodied.Flags(config).parse()
+    logdir = embodied.Path(config.logdir)
+    step = embodied.Counter()
+    logger = embodied.Logger(
+        step,
+        [
+            # embodied.logger.TerminalOutput(),
+            # embodied.logger.JSONLOutput(logdir, "metrics.jsonl"),
+            embodied.logger.TensorBoardOutput(logdir),
+            # embodied.logger.WandBOutput(logdir.name, config),
+            # embodied.logger.MLFlowOutput(logdir.name),
+        ],
+    )
+
+    env = ParticipantEnv(train=True, **kwargs)
+    env = from_gym.FromGym(env, obs_key="vector")
+    env = dreamerv3.wrap_env(env, config)
+    env = embodied.BatchEnv([env], parallel=False)
+    agent = dreamerv3.Agent(env.obs_space, env.act_space, step, config)
+    replay = embodied.replay.Uniform(
+        config.batch_length, config.replay_size, logdir / "replay"
+    )
+    args = embodied.Config(
+        **config.run,
+        logdir=config.logdir,
+        batch_steps=config.batch_size * config.batch_length,
+    )
+
+    if train:
+        embodied.run.train(agent, env, replay, logger, args)
+    else:
+        driver = embodied.Driver(env)
+        checkpoint = embodied.Checkpoint()
+        checkpoint.agent = agent
+        checkpoint.load(args.from_checkpoint, keys=["agent"])
+        policy = lambda *args: agent.policy(*args, mode="eval")
+
+        while True:
+            _time_before = time.time()
+            driver._step(policy, 0, 0)
+            print(f"{time.time() - _time_before:.3f}", flush=True)
+
+
 if __name__ == "__main__":
-    wrestler = ParticipantEnv(train=TRAIN)
-    wrestler._random_agent()
+    if RANDOM_AGENT:
+        wrestler = ParticipantEnv(train=TRAIN)
+        wrestler._random_agent()
+    else:
+        dreamerv3(train=TRAIN)

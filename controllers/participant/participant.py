@@ -1,39 +1,174 @@
-# Copyright 1996-2023 Cyberbotics Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Minimalist controller example for the Robot Wrestling Tournament.
-   Demonstrates how to play a simple motion file."""
-
-from controller import Robot
+import os
 import sys
+import time
 
-# We provide a set of utilities to help you with the development of your controller. You can find them in the utils folder.
-# If you want to see a list of examples that use them, you can go to https://github.com/cyberbotics/wrestling#demo-robot-controllers
-sys.path.append('..')
-from utils.motion_library import MotionLibrary
+import numpy as np
+
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+from controller import Robot
+from sensors.camera_sensor import *
+from sensors.distance_sensor import SonarSensorsCombined
+from sensors.force_sensor import ForceSensorsCombined
+from sensors.inertial_sensor import InertialMeasurementUnit
+from sensors.joint_position_sensor import JointPositionSensorsCombined
+from sensors.touch_sensor import TouchSensorsCombined
+
+TRAIN: bool = False
+RANDOM_AGENT: bool = False and not TRAIN
+DEBUG: bool = False and not TRAIN
+
+if os.environ.get("CI"):
+    TRAIN = False
+    RANDOM_AGENT = False
+    DEBUG: bool = False
 
 
-class Wrestler (Robot):
-    def run(self):
-        # to load all the motions from the motions folder, we use the MotionLibrary class:
-        motion_library = MotionLibrary()
-        # retrieves the WorldInfo.basicTimeTime (ms) from the world file
-        time_step = int(self.getBasicTimeStep())
-        while self.step(time_step) != -1:  # mandatory function to make the simulation run
-            motion_library.play('Backwards')
+class SpaceBot(Robot):
 
+    def __init__(
+        self,
+        ## Observations
+        # Vector
+        observation_vector_enable: bool = True,
+        observation_vector_enable_joint_positions: bool = True,
+        observation_vector_enable_imu: bool = True,
+        observation_vector_enable_sonars: bool = True,
+        observation_vector_enable_force: bool = False,
+        observation_vector_enable_touch: bool = False,
+        # Camera
+        observation_image_enable: bool = True,
+        camera_height: int = 32,
+        camera_width: int = 32,
+        camera_crop_left: int = 20,
+        camera_crop_right: int = 20,
+        camera_crop_top: int = 0,
+        camera_crop_bottom: int = 0,
+    ):
+        super().__init__()
+        self.time_step = int(self.getBasicTimeStep())
+        self.TIME_STEP: float = 0.001 * self.time_step
 
-# create the Robot instance and run main loop
-wrestler = Wrestler()
-wrestler.run()
+        ## Observations
+        self.observation_vector_enable = observation_vector_enable
+        self.observation_image_enable = observation_image_enable
+        assert (
+            self.observation_image_enable or self.observation_vector_enable
+        ), "At least one of the observation types must be enabled"
+
+        # Vector observations
+        if self.observation_vector_enable:
+            self.observation_vector_size: int = 0
+
+            self.observation_vector_enable_joint_positions = (
+                observation_vector_enable_joint_positions
+            )
+            if self.observation_vector_enable_joint_positions:
+                self.joint_pos_sensors = JointPositionSensorsCombined(
+                    robot=self,
+                    time_step=self.time_step,
+                    # TODO: Observe all joint positions
+                    simplified_scheme=True,
+                    include_fingers=False,
+                )
+                self.observation_vector_size += self.joint_pos_sensors.output_size
+
+            self.observation_vector_enable_imu = observation_vector_enable_imu
+            if self.observation_vector_enable_imu:
+                self.imu = InertialMeasurementUnit(robot=self, time_step=self.time_step)
+                self.observation_vector_size += self.imu.output_size
+
+            self.observation_vector_enable_sonars = observation_vector_enable_sonars
+            if self.observation_vector_enable_sonars:
+                self.sonars = SonarSensorsCombined(robot=self, time_step=self.time_step)
+                self.observation_vector_size += self.sonars.output_size
+
+            self.observation_vector_enable_force = observation_vector_enable_force
+            if self.observation_vector_enable_force:
+                self.force_sensors = ForceSensorsCombined(
+                    robot=self, time_step=self.time_step
+                )
+                self.observation_vector_size += self.force_sensors.output_size
+
+            self.observation_vector_enable_touch = observation_vector_enable_touch
+            if self.observation_vector_enable_touch:
+                self.touch_sensors = TouchSensorsCombined(
+                    robot=self, time_step=self.time_step
+                )
+                self.observation_vector_size += self.touch_sensors.output_size
+
+        # Image observations
+        if self.observation_image_enable:
+            self.cameras = CameraTop(
+                robot=self,
+                time_step=self.time_step,
+                crop_left=camera_crop_left,
+                crop_right=camera_crop_right,
+                crop_top=camera_crop_top,
+                crop_bottom=camera_crop_bottom,
+                resize_height=camera_height,
+                resize_width=camera_width,
+            )
+            self.observation_image_height = self.cameras.height
+            self.observation_image_width = self.cameras.width
+            self.observation_image_channels = 3
+
+    def low_level_controller(self):
+        overtime: float = 0.0
+        while True:
+            time_before: float = time.time()
+
+            if self.step(self.time_step) == -1:
+                break
+
+            ## Wait for the time step to finish
+            time_to_sleep = self.TIME_STEP - (time.time() - time_before)
+            if time_to_sleep > 0.0:
+                time_to_sleep += overtime
+                overtime = 0.0
+                if time_to_sleep > 0.0:
+                    time.sleep(time_to_sleep)
+            else:
+                overtime = time_to_sleep
+
+    def get_observations(self) -> np.ndarray:
+        if self.observation_vector_enable:
+            joint_pos_obs_norm = np.empty(0)
+            imu_obs_norm = np.empty(0)
+            sonar_obs_norm = np.empty(0)
+            force_obs_norm = np.empty(0)
+            touch_obs_norm = np.empty(0)
+            if self.observation_vector_enable_joint_positions:
+                joint_pos_obs_norm = (
+                    self.joint_pos_sensors.get_joint_position_normalized()
+                )
+            if self.observation_vector_enable_imu:
+                imu_obs_norm = self.imu.get_inertial_measurements_normalized()
+            if self.observation_vector_enable_sonars:
+                sonar_obs_norm = self.sonars.get_distance_normalized()
+            if self.observation_vector_enable_force:
+                force_obs_norm = self.force_sensors.get_force_normalized()
+            if self.observation_vector_enable_touch:
+                touch_obs_norm = self.touch_sensors.get_touch_normalized()
+            vector_obs = np.hstack(
+                (
+                    joint_pos_obs_norm,
+                    imu_obs_norm,
+                    sonar_obs_norm,
+                    force_obs_norm,
+                    touch_obs_norm,
+                    self._is_action_being_replayed,
+                )
+            )
+        if self.observation_image_enable:
+            image_obs = self.cameras.get_image_rgb()[:, :, ::-1]
+
+        if self.observation_vector_enable and self.observation_image_enable:
+            return {
+                "vector": vector_obs,
+                "image": image_obs,
+            }
+        elif self.observation_vector_enable:
+            return vector_obs
+        elif self.observation_image_enable:
+            return image_obs
+

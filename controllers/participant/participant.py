@@ -2,6 +2,7 @@ import os
 import sys
 import threading
 import time
+from typing import Tuple
 
 import numpy as np
 
@@ -10,7 +11,7 @@ from actuators.gait_controller import GaitController
 from actuators.joint_controller import *
 from actuators.led_controller import LedControllersCombined
 from actuators.replay_motion_controller import ReplayMotionController
-from controller import Robot
+from controller import Robot, Supervisor
 from sensors.camera_sensor import *
 from sensors.distance_sensor import SonarSensorsCombined
 from sensors.force_sensor import ForceSensorsCombined
@@ -61,6 +62,16 @@ class SpaceBot(Robot):
         action_joints_relative: bool = True,
         action_joints_relative_scaling: float = 0.15,
         include_fingers: bool = False,
+        ## Training
+        train: bool = TRAIN,
+        reward_for_each_step_standing: float = 1.0,
+        reward_knockout_trainee: float = 50.0,
+        reward_knockout_opponent: float = 2.5,
+        reward_knockout_opponent_without_trainee_knockout: float = 20.0,
+        max_distance_knockout_opponent: float = 0.8,
+        reward_distance_from_centre: float = 1.0,
+        reward_coverage_trainee: float = 50.0,
+        reward_coverage_opponent: float = 0.0,
     ):
         super().__init__()
         self.time_step = int(self.getBasicTimeStep())
@@ -257,6 +268,20 @@ class SpaceBot(Robot):
             self.action_joints_relative = action_joints_relative
             self.action_joints_relative_scaling = action_joints_relative_scaling
 
+        # Trainer (if training is enabled and supervisor is available)
+        self.is_training = train and self.getSupervisor()
+        if self.is_training:
+            self.trainer = Trainer(
+                reward_for_each_step_standing=reward_for_each_step_standing,
+                reward_knockout_trainee=reward_knockout_trainee,
+                reward_knockout_opponent=reward_knockout_opponent,
+                reward_knockout_opponent_without_trainee_knockout=reward_knockout_opponent_without_trainee_knockout,
+                max_distance_knockout_opponent=max_distance_knockout_opponent,
+                reward_distance_from_centre=reward_distance_from_centre,
+                reward_coverage_trainee=reward_coverage_trainee,
+                reward_coverage_opponent=reward_coverage_opponent,
+            )
+
     def low_level_controller(self):
         overtime: float = 0.0
         while True:
@@ -432,3 +457,232 @@ class SpaceBot(Robot):
             return vector_obs
         elif self.observation_image_enable:
             return image_obs
+
+    def get_reward(self, **kwargs) -> Tuple[float, bool]:
+        if self.is_training:
+            return self.trainer.get_reward()
+        else:
+            return 0.0, False
+
+class Trainer(Supervisor):
+    ## Constants taken from the supervisor
+    ROBOT_MIN_Z: float = 0.9
+    RING_MAX_XY: float = 1.0
+    EXPLOSION_MAX_XYZ: float = 1.5
+
+    ## Additional constants
+    ARENA_CENTER_XY: np.ndarray = np.zeros(2, dtype=np.float32)
+    MAX_REWARDING_DISTANCE_FROM_CENTRE: float = 0.85
+    MIN_DELTA_COVERAGE: float = 0.0001
+    MAX_DELTA_COVERAGE: float = 1.0
+
+    def __init__(
+        self,
+        reward_for_each_step_standing: float,
+        reward_knockout_trainee: float,
+        reward_knockout_opponent: float,
+        reward_knockout_opponent_without_trainee_knockout: float,
+        max_distance_knockout_opponent: float,
+        reward_distance_from_centre: float,
+        reward_coverage_trainee: float,
+        reward_coverage_opponent: float,
+    ):
+        from controller import Node
+
+        subject_name = self.getName()
+        if subject_name == "participant":
+            self.id_trainee = 0
+            self.id_opponent = 1
+        elif subject_name == "opponent":
+            self.id_trainee = 1
+            self.id_opponent = 0
+        else:
+            raise Exception(f"Unknown subject of training (name: '{subject_name}')")
+
+        self.robot: Tuple[Node, Node] = (
+            self.getFromDef("WRESTLER_RED"),
+            self.getFromDef("WRESTLER_BLUE"),
+        )
+        self.robot_head: Tuple[Node, Node] = (
+            self.robot[0].getFromProtoDef("HEAD_SLOT"),
+            self.robot[1].getFromProtoDef("HEAD_SLOT"),
+        )
+
+        self.time_step = int(self.getBasicTimeStep())
+        self.current_time = self.getTime()
+
+        self.reset()
+
+        self.reward_for_each_step_standing = reward_for_each_step_standing
+        self.reward_knockout_trainee = reward_knockout_trainee
+        self.reward_knockout_opponent = reward_knockout_opponent
+        self.reward_knockout_opponent_without_trainee_knockout = (
+            reward_knockout_opponent_without_trainee_knockout
+        )
+        self.max_distance_knockout_opponent = max_distance_knockout_opponent
+        self.reward_distance_from_centre = reward_distance_from_centre
+        self.reward_coverage_trainee = reward_coverage_trainee
+        self.reward_coverage_opponent = reward_coverage_opponent
+
+    def reset(self):
+        self._current_position_body = np.array(
+            [self.robot[i].getPosition() for i in range(2)], dtype=np.float32
+        )
+        self._current_position_head = np.array(
+            [self.robot_head[i].getPosition() for i in range(2)], dtype=np.float32
+        )
+        self._is_knocked = np.zeros(2, dtype=bool)
+        self._is_near_opponent = False
+        self._was_near_opponent = False
+        self._previous_reward = 0.0
+
+        self._coverage_min_position = np.zeros((2, 3), dtype=np.float32)
+        self._coverage_min_position[0, 0] = -self.MAX_REWARDING_DISTANCE_FROM_CENTRE
+        self._coverage_min_position[1, 0] = self.MAX_REWARDING_DISTANCE_FROM_CENTRE
+        self._coverage_max_position = self._coverage_min_position.copy()
+        self._coverage = np.zeros(2, dtype=np.float32)
+        self._coverage_delta = np.zeros(2, dtype=np.float32)
+
+    def get_reward(
+        self,
+    ) -> Tuple[float, bool]:
+        # Update time and reset the episode if needed (detected as a step back in time)
+        new_time = self.getTime()
+        delta_time = new_time - self.current_time
+        self.current_time = new_time
+        if delta_time < 0.0:
+            return self._previous_reward, True
+
+        # Update position of the robots and their heads
+        self._current_position_body = np.array(
+            [self.robot[i].getPosition() for i in range(2)], dtype=np.float32
+        )
+        self._current_position_head = np.array(
+            [self.robot_head[i].getPosition() for i in range(2)], dtype=np.float32
+        )
+
+        # Update ring coverage and knock-out counter for each robot (based on head position)
+        for i in range(2):
+            # Update knock-out counter if the robot is below the height threshold
+            #                          or the robot exploded (any coordinate above a threshold)
+            self._is_knocked[i] = (
+                self._current_position_head[i, 2] < self.ROBOT_MIN_Z
+                or np.abs(self._current_position_head[i, 0]) > self.EXPLOSION_MAX_XYZ
+                or np.abs(self._current_position_head[i, 1]) > self.EXPLOSION_MAX_XYZ
+                or self._current_position_head[i, 2] > self.EXPLOSION_MAX_XYZ
+            )
+
+            # Update ring coverage if the robot is inside the ring
+            if (
+                np.abs(self._current_position_head[i, 0]) < self.RING_MAX_XY
+                and np.abs(self._current_position_head[i, 1]) < self.RING_MAX_XY
+            ):
+                new_coverage = 0.0
+                for j in range(2):
+                    if (
+                        self._current_position_head[i, j]
+                        < self._coverage_min_position[i, j]
+                    ):
+                        self._coverage_min_position[i, j] = self._current_position_head[
+                            i, j
+                        ]
+                    elif (
+                        self._current_position_head[i, j]
+                        > self._coverage_max_position[i, j]
+                    ):
+                        self._coverage_max_position[i, j] = self._current_position_head[
+                            i, j
+                        ]
+                    box = (
+                        self._coverage_max_position[i, j]
+                        - self._coverage_min_position[i, j]
+                    )
+                    new_coverage += box * box
+                new_coverage = np.sqrt(new_coverage)
+                self._coverage_delta[i] = new_coverage - self._coverage[i]
+                if (
+                    self._coverage_delta[i] < self.MIN_DELTA_COVERAGE
+                    or self._coverage_delta[i] > self.MAX_DELTA_COVERAGE
+                ):
+                    self._coverage_delta[i] = 0.0
+                self._coverage[i] += self._coverage_delta[i]
+
+        # Determine if the trainee is close enough to the opponent for a knock-out (based on robot/body position)
+        # It is enough to be near only once per knock-out to be considered near enough for the
+        # whole duration of the specific knock-out (reset if the opponent stands up)
+        if self._was_near_opponent:
+            if self._is_knocked[self.id_opponent]:
+                self._is_near_opponent = True
+            else:
+                self._is_near_opponent = False
+                self._was_near_opponent = False
+        elif self._is_knocked[self.id_opponent]:
+            distance_between_robots = np.linalg.norm(
+                self._current_position_body[self.id_trainee, :2]
+                - self._current_position_body[self.id_opponent, :2]
+            )
+            self._is_near_opponent = (
+                distance_between_robots < self.max_distance_knockout_opponent
+            )
+            self._was_near_opponent = self._is_near_opponent
+
+        ## Compute reward
+        reward = 0.0
+
+        ## If the trainee is knocked, subtract reward (continuous, down to -self.reward_knockout_trainee)
+        if self._is_knocked[self.id_trainee]:
+            if (
+                np.abs(self._current_position_head[self.id_trainee, 0])
+                > self.EXPLOSION_MAX_XYZ
+                or np.abs(self._current_position_head[self.id_trainee, 1])
+                > self.EXPLOSION_MAX_XYZ
+                or self._current_position_head[self.id_trainee, 2]
+                > self.EXPLOSION_MAX_XYZ
+            ):
+                reward -= self.reward_knockout_trainee
+            elif self._current_position_head[self.id_trainee, 2] < self.ROBOT_MIN_Z:
+                trainee_distance_from_min_z = (
+                    self.ROBOT_MIN_Z - self._current_position_head[self.id_trainee, 2]
+                )
+                trainee_distance_from_min_z_normalized = (
+                    trainee_distance_from_min_z / self.ROBOT_MIN_Z
+                )
+                reward -= (
+                    self.reward_knockout_trainee
+                    * trainee_distance_from_min_z_normalized
+                )
+            else:
+                raise ValueError("Unexpected position of the trainee")
+        else:
+            # If the trainee is not knocked, add reward (+self.scale_standing)
+            reward += self.reward_for_each_step_standing
+
+        ## If the opponent is knocked and the trainee is near enough, add reward
+        if self._is_knocked[self.id_opponent] and self._is_near_opponent:
+            opponent_knocked_multiplier = (
+                1.0
+                if self._is_knocked[self.id_trainee]
+                else self.reward_knockout_opponent_without_trainee_knockout
+            )
+            reward += opponent_knocked_multiplier * self.reward_knockout_opponent
+
+        ## Reward for the closer the trainee is from the centre of the arena (if not knocked)
+        if not self._is_knocked[self.id_trainee]:
+            trainee_distance_to_centre = np.linalg.norm(
+                self._current_position_body[self.id_trainee, :2] - self.ARENA_CENTER_XY,
+            )
+            trainee_distance_to_centre_normalized = (
+                min(self.MAX_REWARDING_DISTANCE_FROM_CENTRE, trainee_distance_to_centre)
+                / self.MAX_REWARDING_DISTANCE_FROM_CENTRE
+            )
+            reward += (
+                1.0 - trainee_distance_to_centre_normalized
+            ) * self.reward_distance_from_centre
+
+        # Update reward for ring coverage (positive for trainee, negative for opponent)
+        # The reward is proportional to the increase in ring coverage
+        reward += self.reward_coverage_trainee * self._coverage_delta[self.id_trainee]
+        reward -= self.reward_coverage_opponent * self._coverage_delta[self.id_opponent]
+
+        self._previous_reward = reward
+        return reward, False

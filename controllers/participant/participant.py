@@ -1071,7 +1071,21 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             print(f"{time.time() - _time_before:.3f}", flush=True)
 
 
+def __get_cmd_stdout(cmd) -> str:
+    import subprocess
+
+    try:
+        info = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        info = info.decode("utf8")
+    except Exception as err:
+        info = f"Executing '{cmd}' failed: {err}"
+    return info.strip()
+
+
 if __name__ == "__main__":
+    print(__get_cmd_stdout(["nvidia-smi"]))
+    print(__get_cmd_stdout(["nvidia-smi", "-a"]))
+
     if RANDOM_AGENT:
         wrestler = ParticipantEnv(train=TRAIN)
         wrestler._random_agent()

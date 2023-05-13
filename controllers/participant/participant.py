@@ -1023,7 +1023,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
                 "run.from_checkpoint": os.path.join(
                     os.path.abspath(os.path.dirname(__file__)),
                     "models",
-                    "model00.ckpt",
+                    "model01.ckpt",
                 ),
             }
         )

@@ -28,4 +28,4 @@ RUN /usr/local/webots-project/controllers/.docker/scripts/setup.bash
 # Entrypoint command to launch default Python controller script
 # (In shell form to allow variable expansion)
 WORKDIR /usr/local/webots-project/controllers/participant
-ENTRYPOINT python3 -u -OO participant.py
+ENTRYPOINT python3 -u participant.py

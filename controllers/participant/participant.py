@@ -1011,7 +1011,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             # "encoder.cnn_keys": "$^",
             # "decoder.cnn_keys": "$^",
             "rssm.deter": 1024,
-            # "jax.platform": "cpu",
+            "jax.platform": "cpu",
             # "jax.jit": False,
             "jax.prealloc": train,
             "jax.precision": "float16",

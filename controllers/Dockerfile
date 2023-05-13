@@ -1,14 +1,12 @@
-FROM cyberbotics/webots.cloud:R2023a-ubuntu20.04-numpy
+FROM cyberbotics/webots.cloud:R2023a-ubuntu20.04
 
-# Additional dependencies for the utils folder
-RUN apt-get update && apt-get install -y \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-RUN pip3 install --upgrade pip && \
-    pip3 install --no-cache-dir \
-    opencv-python \
-    scipy \
-    ahrs
+# Install dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive \
+    apt-get install -yq --no-install-recommends \
+        git \
+        python3-pip && \
+    rm -rf /var/lib/apt/lists/*
 
 # Environment variables needed for Webots
 # https://cyberbotics.com/doc/guide/running-extern-robot-controllers#remote-extern-controllers
@@ -18,12 +16,16 @@ ENV LD_LIBRARY_PATH=${WEBOTS_HOME}/lib/controller:${LD_LIBRARY_PATH}
 ARG WEBOTS_CONTROLLER_URL
 ENV WEBOTS_CONTROLLER_URL=${WEBOTS_CONTROLLER_URL}
 
-# Copies all the files of the controllers folder into the docker container
-RUN mkdir -p /usr/local/webots-project/controllers
-COPY . /usr/local/webots-project/controllers
+# Environment variables needed for NVIDIA GPU
+ENV NVIDIA_VISIBLE_DEVICES="all"
+ENV NVIDIA_DRIVER_CAPABILITIES="all"
 
-# Prepares the controller of the participant
+# Prepares the controller of the participant via the setup.bash script
+COPY .docker/scripts/setup.bash /usr/local/webots-project/controllers/.docker/scripts/setup.bash
 RUN /usr/local/webots-project/controllers/.docker/scripts/setup.bash
+
+# Copies all the files of the controllers folder into the docker container
+COPY . /usr/local/webots-project/controllers
 
 # Entrypoint command to launch default Python controller script
 # (In shell form to allow variable expansion)

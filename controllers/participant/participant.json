@@ -1,6 +1,6 @@
 {
   "name": "Andrej Orsula",
-  "description": "Description of my robot controller program.",
+  "description": "Policy acquired via Model-Based Reinforcement Learning",
   "country": "LU",
   "programming": "Python"
 }

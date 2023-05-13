@@ -4,8 +4,7 @@ Participant of the [ICRA 2023 Humanoid Robot Wrestling Competition](https://webo
 
 ## Description
 
-This controller employs a policy trained via Model-Based Reinforcement Learning (MBRL). Details about the policy for specific
-models can be found below.
+This controller employs a policy trained via Model-Based Reinforcement Learning (MBRL). Details about the policy for specific models can be found below. All models are available for download [here](https://drive.google.com/drive/folders/1i3eUdABo_NtjtT7qd0BoPvuwwoJSwRJZ?usp=share_link).
 
 |  Model  |                      Algorithm                       |           Observation Space            |  Action Space   | Size of Policy (Actor) |
 | :-----: | :--------------------------------------------------: | :------------------------------------: | :-------------: | :--------------------: |

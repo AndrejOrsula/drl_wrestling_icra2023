@@ -3,7 +3,7 @@
 ## The command to run inside the container
 PROCESS_CMD=(
     webots
-    /root/ws/worlds/wrestling.wbt
+    /usr/local/webots-project/worlds/wrestling.wbt
     --no-rendering
     "${@}"
 )

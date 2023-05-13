@@ -1084,7 +1084,6 @@ def __get_cmd_stdout(cmd) -> str:
 
 if __name__ == "__main__":
     print(__get_cmd_stdout(["nvidia-smi"]))
-    print(__get_cmd_stdout(["nvidia-smi", "-a"]))
 
     if RANDOM_AGENT:
         wrestler = ParticipantEnv(train=TRAIN)

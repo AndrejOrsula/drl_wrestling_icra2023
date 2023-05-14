@@ -33,14 +33,15 @@ class Referee(Supervisor):
             for i in range(10):
                 self.digit[j][i] = self.getDevice("digit " + str(j) + str(i))
         self.current_digit = [0, 0, 0]  # 0:00
-        self.robot = [0] * 2
-        self.robot[0] = self.getFromDef("WRESTLER_RED").getFromProtoDef("HEAD_SLOT")
-        self.robot[1] = self.getFromDef("WRESTLER_BLUE").getFromProtoDef("HEAD_SLOT")
+        self.robot = (self.getFromDef("WRESTLER_RED"), self.getFromDef("WRESTLER_BLUE"))
+        self.robot_head = tuple(
+            [robot.getFromProtoDef("HEAD_SLOT") for robot in self.robot]
+        )
         self.min = [[0] * 3 for i in range(2)]
         self.max = [[0] * 3 for i in range(2)]
         for i in range(2):
-            self.min[i] = self.robot[i].getPosition()
-            self.max[i] = self.robot[i].getPosition()
+            self.min[i] = self.robot_head[i].getPosition()
+            self.max[i] = self.robot_head[i].getPosition()
         self.coverage = [0] * 2
         self.ko_count = [0] * 2
         # linear motors on the side of the ring to display the coverage visually
@@ -61,6 +62,14 @@ class Referee(Supervisor):
         self.current_digit[2] = seconds % 10
         for j in range(3):
             self.digit[j][self.current_digit[j]].setPosition(0)  # visible
+
+    def reset(self, reload: bool = False):
+        if reload:
+            self.worldReload()
+        else:
+            self.simulationReset()
+            self.step(2 * self.time_step)
+            self.simulationReset()
 
     def run(self, CI, display_info: bool = True):
         time = 0
@@ -90,7 +99,7 @@ class Referee(Supervisor):
                     minutes = int(time / 60000)
                     self.display_time(minutes, seconds)
             for i in range(2):
-                position = self.robot[i].getPosition()
+                position = self.robot_head[i].getPosition()
                 color = 0xFF0000 if i == 0 else 0x0000FF
                 if abs(position[0]) < 1 and abs(position[1]) < 1:  # inside the ring
                     coverage = 0
@@ -204,8 +213,8 @@ referee.simulationSetMode(SIMULATION_MODE)
 if TRAIN and not CI:
     while True:
         referee.init()
-        referee.simulationReset()
         referee.run(CI=False, display_info=DISPLAY_INFO)
+        referee.reset()
 else:
     referee.init()
     referee.run(CI)

@@ -265,8 +265,8 @@ class SpaceBot(Robot):
             self.action_joints_relative_scaling = action_joints_relative_scaling
 
         elif self.action_use_only_replay_motion:
-            self.replay_motion_controller = ReplayMotionController()
-            self.action_replay_motion_size = self.replay_motion_controller.input_size
+            self.replay_controller = ReplayMotionController()
+            self.action_replay_motion_size = self.replay_controller.input_size
 
         else:
             self.joint_controllers = JointControllersCombined(
@@ -441,7 +441,7 @@ class SpaceBot(Robot):
                 self.arm_controllers.set_joint_position_normalized(action_arms)
         else:
             if self.action_use_only_replay_motion:
-                self.replay_motion_controller.play_motion_by_index(action)
+                self.replay_controller.play_motion_by_index(action)
             else:
                 if self.action_joints_relative:
                     self.joint_controllers.set_joint_position_relative_normalized(
@@ -510,6 +510,10 @@ class SpaceBot(Robot):
 
         if self.is_training:
             self.trainer.reset()
+            for _ in range(2):
+                self.replay_controller.stop_current_motion()
+                self.replay_controller.play_motion_by_name("Prepare")
+                self.step(self.time_step)
 
             if self.EMULATE_STARTUP_DELAY_DURING_TRAINING:
                 time.sleep(

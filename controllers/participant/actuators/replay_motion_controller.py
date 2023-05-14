@@ -109,3 +109,8 @@ class ReplayMotionController:
             return self.play_motion_by_name(
                 self.__motion_list_reverse[index - self.n_motions_forward]
             )
+
+    def stop_current_motion(self):
+        if self.__current_motion is not None:
+            self.__current_motion[1].stop()
+            self.__current_motion = None

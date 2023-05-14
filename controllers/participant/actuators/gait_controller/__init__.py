@@ -1,1 +1,1 @@
-from .gait_controller import GaitController
+from .slide_gait_controller import SlideGaitController

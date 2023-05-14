@@ -9,7 +9,7 @@ import numpy as np
 from controller import Robot, Supervisor
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-from actuators.gait_controller import GaitController
+from actuators.gait_controller import SlideGaitController
 from actuators.joint_controller import *
 from actuators.led_controller import LedControllersCombined
 from actuators.replay_motion_controller import ReplayMotionController
@@ -33,7 +33,7 @@ if os.environ.get("CI"):
 
 class SpaceBot(Robot):
     MAX_TURNING_RADIUS: float = 2.0
-    MIN_TURNING_RADIUS: float = 0.1
+    MIN_TURNING_RADIUS: float = 0.25
 
     GET_UP_TRIGGER_THRESHOLD: float = 0.75
     GET_UP_MIN_XY_ACCELERATION_MAGNITUDE: float = 5.0
@@ -41,8 +41,8 @@ class SpaceBot(Robot):
     LED_HUE_DELTA: float = 0.015625
 
     EMULATE_STARTUP_DELAY_DURING_TRAINING: bool = True
-    STARTUP_DELAY_MIN: float = 0.0
-    STARTUP_DELAY_MAX: float = 2.0
+    STARTUP_DELAY_MIN: float = 5.0
+    STARTUP_DELAY_MAX: float = 10.0
 
     def __init__(
         self,
@@ -176,14 +176,14 @@ class SpaceBot(Robot):
         ), "Only one of the special action schemes can be used at a time"
         if self.action_use_combined_scheme:
             # Gait controller
-            #   4 Actions: forward_backward, left_right, turn, step_amplitude
-            self.gait_controller = GaitController(
-                robot=self, time_step=self.time_step, imu=self.imu
+            #   ~4~ 3 Actions: forward_backward, left_right, turn, ~step_amplitude~
+            self.gait_controller = SlideGaitController(
+                robot=self, time_step=self.time_step
             )
-            self.gait_desired_radius = 0.0
+            self.gait_desired_radius = 100000.0
             self.gait_heading_angle = 0.0
-            self.gait_step_amplitude = 0.5
-            self.action_gait_controller_input_size = 4
+            # self.gait_step_amplitude = 1.0
+            self.action_gait_controller_input_size = 3
             self.action_gait_indices = [
                 i for i in range(self.action_gait_controller_input_size)
             ]
@@ -207,6 +207,7 @@ class SpaceBot(Robot):
 
             # Start the background thread of the low-level controller
             self._is_agent_ready = False
+            self._is_agent_ready_stance_taken = False
             self._thread = threading.Thread(target=self.low_level_controller)
             self._thread.start()
 
@@ -304,20 +305,29 @@ class SpaceBot(Robot):
             ## Until the agent is ready, perform manual actions
             # self.replay_controller.set_wait_until_finished(self._is_agent_ready)
             if not self._is_agent_ready:
-                if self._is_action_being_replayed == 0.0:
-                    self.replay_controller.play_motion_by_name("Stand")
-                    self._is_action_being_replayed = 1.0
-                elif self.replay_controller.current_motion[1].isOver():
-                    self._is_action_being_replayed = 0.0
-                # Note: This must be disabled based on the motion being played
-                self._set_defensive_position()
+                if not self._is_agent_ready_stance_taken:
+                    if self._is_action_being_replayed == 0.0:
+                        self.replay_controller.play_motion_by_name("Stand")
+                        self._is_action_being_replayed = 1.0
+                        # Note: This must be disabled based on the motion being played
+                        self._set_defensive_position()
+                    elif self.replay_controller.current_motion[1].isOver():
+                        self._is_agent_ready_stance_taken = True
+                        self._is_action_being_replayed = 0.0
+                else:
+                    self.gait_controller.set_step_amplitude(0.5)
+                    self.gait_controller.command_to_motors(
+                        desired_radius=100000.0,
+                        heading_angle=0.0,
+                    )
+
             else:
                 ## Only play gait if the agent is ready and no action is being replayed
                 if self._is_action_being_replayed != 0.0:
                     if self.replay_controller.current_motion[1].isOver():
                         self._is_action_being_replayed = 0.0
                 else:
-                    self.gait_controller.set_step_amplitude(self.gait_step_amplitude)
+                    self.gait_controller.set_step_amplitude(1.0)
                     self.gait_controller.command_to_motors(
                         desired_radius=self.gait_desired_radius,
                         heading_angle=self.gait_heading_angle,
@@ -342,8 +352,9 @@ class SpaceBot(Robot):
     def apply_action(self, action: np.ndarray):
         self._is_agent_ready = True
         if self.action_use_combined_scheme:
-            if self.step(self.time_step) == -1:
-                return
+            if self.is_training:
+                if self.step(self.time_step) == -1:
+                    return
 
             if self._is_action_being_replayed != 0.0:
                 return
@@ -352,7 +363,7 @@ class SpaceBot(Robot):
                 action_forward_backward,
                 action_left_right,
                 action_turn,
-                action_step_amplitude,
+                # action_step_amplitude,
             ) = action[self.action_gait_indices]
             action_get_up = action[self.action_replay_controller_indices]
             action_head = action[self.action_head_controllers_indices]
@@ -399,12 +410,12 @@ class SpaceBot(Robot):
                     [-self.MIN_TURNING_RADIUS, -self.MAX_TURNING_RADIUS],
                 )
 
-            ## Convert gait_step_amplitude to self.gait_step_amplitude
-            self.gait_step_amplitude = np.interp(
-                action_step_amplitude,
-                [-1.0, 1.0],
-                [0.0, 1.0],
-            )
+            # ## Convert gait_step_amplitude to self.gait_step_amplitude
+            # self.gait_step_amplitude = np.interp(
+            #     action_step_amplitude,
+            #     [-1.0, 1.0],
+            #     [0.0, 1.0],
+            # )
 
             ## Convert gripper_left and gripper_right to gripper action
             if len(action_hands) == 2:
@@ -495,6 +506,7 @@ class SpaceBot(Robot):
             self.gait_controller.reset()
             self._is_action_being_replayed = 0.0
             self._is_agent_ready = False
+            self._is_agent_ready_stance_taken = False
 
         if self.is_training:
             self.trainer.reset()

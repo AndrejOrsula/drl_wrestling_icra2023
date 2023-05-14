@@ -12,15 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .ellipsoid_gait_generator import EllipsoidGaitGenerator
 from .kinematics import Kinematics
+from .slide_gait_generator import SlideGaitGenerator
 
 
-class GaitController:
-    """Connects the Kinematics class and the EllipsoidGaitGenerator class together to have a simple gait interface."""
+class SlideGaitController:
+    """Connects the Kinematics class and the SlideGaitGenerator class together to have a simple gait interface."""
 
-    def __init__(self, robot, time_step, imu):
-        self.gait_generator = EllipsoidGaitGenerator(robot, time_step, imu=imu)
+    def __init__(self, robot, time_step):
+        self.gait_generator = SlideGaitGenerator(robot, time_step)
         self.kinematics = Kinematics()
         joints = [
             "HipYawPitch",

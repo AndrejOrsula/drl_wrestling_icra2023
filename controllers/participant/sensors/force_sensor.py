@@ -22,8 +22,7 @@ class ForceRightFoot(__ForceSensor):
 
 
 class ForceSensorsCombined:
-    # TODO: Adjust limits of force sensor
-    MAX_FORCE: float = 75.0
+    MAX_FORCE: float = 200.0
 
     def __init__(self, robot: Robot, time_step: float):
         self.force_left_foot = ForceLeftFoot(robot=robot, time_step=time_step)

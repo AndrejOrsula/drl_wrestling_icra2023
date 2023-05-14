@@ -23,9 +23,8 @@ class GyroscopeSensor:
 
 
 class InertialMeasurementUnit:
-    # TODO: Adjust limits of IMU
-    CLIP_MAX_ACC: float = 10.0
-    CLIP_MAX_GYRO: float = 1.0
+    CLIP_MAX_ACC: float = 20.0
+    CLIP_MAX_GYRO: float = 2 * np.pi
 
     def __init__(self, robot: Robot, time_step: float):
         self.accelerometer = AccelerometerSensor(robot=robot, time_step=time_step)

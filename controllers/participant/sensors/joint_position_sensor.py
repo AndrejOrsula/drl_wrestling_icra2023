@@ -277,7 +277,10 @@ class JointPositionSensorsCombined:
         self,
         robot: Robot,
         time_step: float,
-        simplified_scheme: bool = False,
+        head_yaw: bool = False,
+        head_pitch: bool = False,
+        simplified_scheme_legs: bool = False,
+        simplified_scheme_arms: bool = False,
         include_fingers: bool = False,
     ):
         self.__position_sensors = [
@@ -296,19 +299,31 @@ class JointPositionSensorsCombined:
             PositionRKneePitch(robot=robot, time_step=time_step),
             PositionRAnklePitch(robot=robot, time_step=time_step),
         ]
-        if not simplified_scheme:
+        if head_yaw:
+            self.__position_sensors.append(
+                PositionHeadYaw(robot=robot, time_step=time_step)
+            )
+        if head_pitch:
+            self.__position_sensors.append(
+                PositionHeadPitch(robot=robot, time_step=time_step)
+            )
+
+        if not simplified_scheme_legs:
             self.__position_sensors.extend(
                 [
-                    PositionHeadYaw(robot=robot, time_step=time_step),
-                    PositionHeadPitch(robot=robot, time_step=time_step),
-                    PositionLElbowYaw(robot=robot, time_step=time_step),
-                    PositionLWristYaw(robot=robot, time_step=time_step),
                     PositionLHipYawPitch(robot=robot, time_step=time_step),
                     PositionLAnkleRoll(robot=robot, time_step=time_step),
-                    PositionRElbowYaw(robot=robot, time_step=time_step),
-                    PositionRWristYaw(robot=robot, time_step=time_step),
                     PositionRHipYawPitch(robot=robot, time_step=time_step),
                     PositionRAnkleRoll(robot=robot, time_step=time_step),
+                ]
+            )
+        if not simplified_scheme_arms:
+            self.__position_sensors.extend(
+                [
+                    PositionLElbowYaw(robot=robot, time_step=time_step),
+                    PositionLWristYaw(robot=robot, time_step=time_step),
+                    PositionRElbowYaw(robot=robot, time_step=time_step),
+                    PositionRWristYaw(robot=robot, time_step=time_step),
                 ]
             )
         if include_fingers:

@@ -6,13 +6,13 @@ from typing import Tuple
 
 import gym
 import numpy as np
+from controller import Robot, Supervisor
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from actuators.gait_controller import GaitController
 from actuators.joint_controller import *
 from actuators.led_controller import LedControllersCombined
 from actuators.replay_motion_controller import ReplayMotionController
-from controller import Robot, Supervisor
 from sensors.camera_sensor import *
 from sensors.distance_sensor import SonarSensorsCombined
 from sensors.force_sensor import ForceSensorsCombined
@@ -34,8 +34,15 @@ if os.environ.get("CI"):
 class SpaceBot(Robot):
     MAX_TURNING_RADIUS: float = 2.0
     MIN_TURNING_RADIUS: float = 0.1
+
     GET_UP_TRIGGER_THRESHOLD: float = 0.75
+    GET_UP_MIN_XY_ACCELERATION_MAGNITUDE: float = 5.0
+
     LED_HUE_DELTA: float = 0.015625
+
+    EMULATE_STARTUP_DELAY_DURING_TRAINING: bool = True
+    STARTUP_DELAY_MIN: float = 0.0
+    STARTUP_DELAY_MAX: float = 2.0
 
     def __init__(
         self,
@@ -45,13 +52,12 @@ class SpaceBot(Robot):
         observation_vector_enable_joint_positions: bool = True,
         observation_vector_enable_imu: bool = True,
         observation_vector_enable_sonars: bool = True,
-        # TODO: Enable all sensors
-        observation_vector_enable_force: bool = False,
+        observation_vector_enable_force: bool = True,
         observation_vector_enable_touch: bool = False,
         # Camera
         observation_image_enable: bool = True,
-        camera_height: int = 32,
-        camera_width: int = 32,
+        camera_height: int = 24,
+        camera_width: int = 24,
         camera_crop_left: int = 20,
         camera_crop_right: int = 20,
         camera_crop_top: int = 0,
@@ -61,7 +67,7 @@ class SpaceBot(Robot):
         action_use_combined_scheme: bool = True,
         action_use_only_replay_motion: bool = False,
         action_joints_relative: bool = True,
-        action_joints_relative_scaling: float = 0.15,
+        action_joints_relative_scaling: float = 0.5,
         include_fingers: bool = False,
         ## Training
         train: bool = TRAIN,
@@ -71,8 +77,9 @@ class SpaceBot(Robot):
         reward_knockout_opponent_without_trainee_knockout: float = 20.0,
         max_distance_knockout_opponent: float = 0.8,
         reward_distance_from_centre: float = 1.0,
-        reward_coverage_trainee: float = 50.0,
-        reward_coverage_opponent: float = 0.0,
+        reward_coverage_delta_trainee: float = 40.0,
+        reward_coverage_total_trainee: float = 1.0,
+        reward_coverage_delta_opponent: float = 1.0,
     ):
         super().__init__()
         self.time_step = int(self.getBasicTimeStep())
@@ -96,8 +103,10 @@ class SpaceBot(Robot):
                 self.joint_pos_sensors = JointPositionSensorsCombined(
                     robot=self,
                     time_step=self.time_step,
-                    # TODO: Observe all joint positions
-                    simplified_scheme=True,
+                    head_pitch=False,
+                    head_yaw=True,
+                    simplified_scheme_legs=False,
+                    simplified_scheme_arms=False,
                     include_fingers=False,
                 )
                 self.observation_vector_size += self.joint_pos_sensors.output_size
@@ -203,9 +212,8 @@ class SpaceBot(Robot):
 
             # Joint controllers
             #   N Actions: 1 per joint
-            # TODO: Consider re-enabling head controller (yaw only)
             self.head_controllers = HeadController(
-                robot=self, time_step=self.time_step, yaw=False, pitch=False
+                robot=self, time_step=self.time_step, yaw=True, pitch=False
             )
             self.action_head_controllers_indices = [
                 i
@@ -218,9 +226,8 @@ class SpaceBot(Robot):
                 )
             ]
 
-            # TODO: Consider disabling hand controllers
             self.hand_controllers = HandControllers(
-                robot=self, time_step=self.time_step, enable=True
+                robot=self, time_step=self.time_step, enable=False
             )
             self.action_hand_controllers_indices = [
                 i
@@ -235,7 +242,6 @@ class SpaceBot(Robot):
                 )
             ]
 
-            # TODO: Consider using simplified scheme for arm controllers
             self.arm_controllers = ArmControllers(
                 robot=self, time_step=self.time_step, simplified_scheme=False
             )
@@ -282,8 +288,9 @@ class SpaceBot(Robot):
                 reward_knockout_opponent_without_trainee_knockout=reward_knockout_opponent_without_trainee_knockout,
                 max_distance_knockout_opponent=max_distance_knockout_opponent,
                 reward_distance_from_centre=reward_distance_from_centre,
-                reward_coverage_trainee=reward_coverage_trainee,
-                reward_coverage_opponent=reward_coverage_opponent,
+                reward_coverage_delta_trainee=reward_coverage_delta_trainee,
+                reward_coverage_total_trainee=reward_coverage_total_trainee,
+                reward_coverage_delta_opponent=reward_coverage_delta_opponent,
             )
 
     def low_level_controller(self):
@@ -296,7 +303,6 @@ class SpaceBot(Robot):
 
             ## Until the agent is ready, perform manual actions
             # self.replay_controller.set_wait_until_finished(self._is_agent_ready)
-            # TODO: Emulate the start-up behaviour during training
             if not self._is_agent_ready:
                 if self._is_action_being_replayed == 0.0:
                     self.replay_controller.play_motion_by_name("Stand")
@@ -355,12 +361,14 @@ class SpaceBot(Robot):
 
             ## Convert get_up to action
             if (
-                np.abs(
-                    self.rolling_average_acceleration(
-                        self.imu.accelerometer.get_linear_acceleration()
+                np.linalg.norm(
+                    np.abs(
+                        self.rolling_average_acceleration(
+                            self.imu.accelerometer.get_linear_acceleration()
+                        )[:2]
                     )
-                ).argmax()
-                != 2
+                )
+                > self.GET_UP_MIN_XY_ACCELERATION_MAGNITUDE
             ):
                 if action_get_up > self.GET_UP_TRIGGER_THRESHOLD:
                     self._is_action_being_replayed = 1.0
@@ -491,114 +499,83 @@ class SpaceBot(Robot):
         if self.is_training:
             self.trainer.reset()
 
+            if self.EMULATE_STARTUP_DELAY_DURING_TRAINING:
+                time.sleep(
+                    np.random.uniform(self.STARTUP_DELAY_MIN, self.STARTUP_DELAY_MAX)
+                )
+
     def _init_static_joints(self):
         self.__ControllerHeadPitch = ControllerHeadPitch(
             robot=self, time_step=self.time_step
         )
-        # self.__ControllerHeadYaw = ControllerHeadYaw(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLElbowYaw = ControllerLElbowYaw(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLWristYaw = ControllerLWristYaw(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLHipYawPitch = ControllerLHipYawPitch(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLAnkleRoll = ControllerLAnkleRoll(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRElbowYaw = ControllerRElbowYaw(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRWristYaw = ControllerRWristYaw(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRHipYawPitch = ControllerRHipYawPitch(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRAnkleRoll = ControllerRAnkleRoll(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx1 = ControllerLPhalanx1(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx2 = ControllerLPhalanx2(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx3 = ControllerLPhalanx3(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx4 = ControllerLPhalanx4(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx5 = ControllerLPhalanx5(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx6 = ControllerLPhalanx6(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx7 = ControllerLPhalanx7(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerLPhalanx8 = ControllerLPhalanx8(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx1 = ControllerRPhalanx1(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx2 = ControllerRPhalanx2(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx3 = ControllerRPhalanx3(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx4 = ControllerRPhalanx4(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx5 = ControllerRPhalanx5(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx6 = ControllerRPhalanx6(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx7 = ControllerRPhalanx7(
-        #     robot=self, time_step=self.time_step
-        # )
-        # self.__ControllerRPhalanx8 = ControllerRPhalanx8(
-        #     robot=self, time_step=self.time_step
-        # )
+        self.__ControllerLPhalanx1 = ControllerLPhalanx1(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx2 = ControllerLPhalanx2(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx3 = ControllerLPhalanx3(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx4 = ControllerLPhalanx4(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx5 = ControllerLPhalanx5(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx6 = ControllerLPhalanx6(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx7 = ControllerLPhalanx7(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerLPhalanx8 = ControllerLPhalanx8(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx1 = ControllerRPhalanx1(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx2 = ControllerRPhalanx2(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx3 = ControllerRPhalanx3(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx4 = ControllerRPhalanx4(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx5 = ControllerRPhalanx5(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx6 = ControllerRPhalanx6(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx7 = ControllerRPhalanx7(
+            robot=self, time_step=self.time_step
+        )
+        self.__ControllerRPhalanx8 = ControllerRPhalanx8(
+            robot=self, time_step=self.time_step
+        )
         self._set_default_pose_of_passive_joints()
 
     def _set_default_pose_of_passive_joints(self):
         self.__ControllerHeadPitch.set_joint_position_normalized(0.333)
-        # self.__ControllerHeadYaw.set_joint_position_normalized(0.0)
-        # self.__ControllerLElbowYaw.set_joint_position_normalized(0.0)
-        # self.__ControllerLWristYaw.set_joint_position_normalized(0.0)
-        # self.__ControllerLHipYawPitch.set_joint_position_normalized(0.0)
-        # self.__ControllerLAnkleRoll.set_joint_position_normalized(0.0)
-        # self.__ControllerRElbowYaw.set_joint_position_normalized(0.0)
-        # self.__ControllerRWristYaw.set_joint_position_normalized(0.0)
-        # self.__ControllerRHipYawPitch.set_joint_position_normalized(0.0)
-        # self.__ControllerRAnkleRoll.set_joint_position_normalized(0.0)
-        # self.__ControllerLPhalanx1.set_joint_position_normalized(1.0)
-        # self.__ControllerLPhalanx2.set_joint_position_normalized(1.0)
-        # self.__ControllerLPhalanx3.set_joint_position_normalized(1.0)
-        # self.__ControllerLPhalanx4.set_joint_position_normalized(1.0)
-        # self.__ControllerLPhalanx5.set_joint_position_normalized(1.0)
-        # self.__ControllerLPhalanx6.set_joint_position_normalized(1.0)
-        # self.__ControllerLPhalanx7.set_joint_position_normalized(-1.0)
-        # self.__ControllerLPhalanx8.set_joint_position_normalized(-1.0)
-        # self.__ControllerRPhalanx1.set_joint_position_normalized(1.0)
-        # self.__ControllerRPhalanx2.set_joint_position_normalized(1.0)
-        # self.__ControllerRPhalanx3.set_joint_position_normalized(1.0)
-        # self.__ControllerRPhalanx4.set_joint_position_normalized(1.0)
-        # self.__ControllerRPhalanx5.set_joint_position_normalized(1.0)
-        # self.__ControllerRPhalanx6.set_joint_position_normalized(1.0)
-        # self.__ControllerRPhalanx7.set_joint_position_normalized(-1.0)
-        # self.__ControllerRPhalanx8.set_joint_position_normalized(-1.0)
+        self.__ControllerLPhalanx1.set_joint_position_normalized(1.0)
+        self.__ControllerLPhalanx2.set_joint_position_normalized(1.0)
+        self.__ControllerLPhalanx3.set_joint_position_normalized(1.0)
+        self.__ControllerLPhalanx4.set_joint_position_normalized(1.0)
+        self.__ControllerLPhalanx5.set_joint_position_normalized(1.0)
+        self.__ControllerLPhalanx6.set_joint_position_normalized(1.0)
+        self.__ControllerLPhalanx7.set_joint_position_normalized(-1.0)
+        self.__ControllerLPhalanx8.set_joint_position_normalized(-1.0)
+        self.__ControllerRPhalanx1.set_joint_position_normalized(1.0)
+        self.__ControllerRPhalanx2.set_joint_position_normalized(1.0)
+        self.__ControllerRPhalanx3.set_joint_position_normalized(1.0)
+        self.__ControllerRPhalanx4.set_joint_position_normalized(1.0)
+        self.__ControllerRPhalanx5.set_joint_position_normalized(1.0)
+        self.__ControllerRPhalanx6.set_joint_position_normalized(1.0)
+        self.__ControllerRPhalanx7.set_joint_position_normalized(-1.0)
+        self.__ControllerRPhalanx8.set_joint_position_normalized(-1.0)
 
     def _set_defensive_position(self):
         self._set_default_pose_of_passive_joints()
@@ -611,9 +588,9 @@ class SpaceBot(Robot):
                     0.2,
                     1.0,
                     1.0,
-                    -0.85,
+                    -0.8,
                     -0.1,
-                    0.85,
+                    0.8,
                     0.1,
                 ],
             )
@@ -639,8 +616,9 @@ class Trainer(Supervisor):
         reward_knockout_opponent_without_trainee_knockout: float,
         max_distance_knockout_opponent: float,
         reward_distance_from_centre: float,
-        reward_coverage_trainee: float,
-        reward_coverage_opponent: float,
+        reward_coverage_delta_trainee: float,
+        reward_coverage_total_trainee: float,
+        reward_coverage_delta_opponent: float,
     ):
         from controller import Node
 
@@ -676,8 +654,9 @@ class Trainer(Supervisor):
         )
         self.max_distance_knockout_opponent = max_distance_knockout_opponent
         self.reward_distance_from_centre = reward_distance_from_centre
-        self.reward_coverage_trainee = reward_coverage_trainee
-        self.reward_coverage_opponent = reward_coverage_opponent
+        self.reward_coverage_delta_trainee = reward_coverage_delta_trainee
+        self.reward_coverage_total_trainee = reward_coverage_total_trainee
+        self.reward_coverage_delta_opponent = reward_coverage_delta_opponent
 
     def reset(self):
         self._current_position_body = np.array(
@@ -811,6 +790,10 @@ class Trainer(Supervisor):
         else:
             # If the trainee is not knocked, add reward (+self.scale_standing)
             reward += self.reward_for_each_step_standing
+            # Furthermore, add reward based on the total coverage so far
+            reward += (
+                self.reward_coverage_total_trainee * self._coverage[self.id_trainee]
+            )
 
         ## If the opponent is knocked and the trainee is near enough, add reward
         if self._is_knocked[self.id_opponent] and self._is_near_opponent:
@@ -836,8 +819,12 @@ class Trainer(Supervisor):
 
         # Update reward for ring coverage (positive for trainee, negative for opponent)
         # The reward is proportional to the increase in ring coverage
-        reward += self.reward_coverage_trainee * self._coverage_delta[self.id_trainee]
-        reward -= self.reward_coverage_opponent * self._coverage_delta[self.id_opponent]
+        reward += (
+            self.reward_coverage_delta_trainee * self._coverage_delta[self.id_trainee]
+        )
+        reward -= (
+            self.reward_coverage_delta_opponent * self._coverage_delta[self.id_opponent]
+        )
 
         self._previous_reward = reward
         return reward, False
@@ -938,7 +925,7 @@ class ParticipantEnv(gym.Env):
             raise NotImplementedError
 
     def _random_agent(self, debug: bool = DEBUG):
-        self.reset()
+        observations = self.reset()
         while True:
             if self.robot.action_use_only_replay_motion:
                 action = np.random.randint(0, self.robot.action_replay_motion_size)
@@ -951,17 +938,25 @@ class ParticipantEnv(gym.Env):
 
             observations, reward, done, info = self.step(action)
 
+            if done:
+                self.reset()
+
             if debug:
+                np.set_printoptions(precision=3, suppress=True, floatmode="fixed")
+                print(
+                    "\n------------------------------------------------------------------------"
+                )
+                print(f"action.shape: {action.shape}")
                 if isinstance(observations, dict):
                     if "vector" in observations:
-                        print(f"observations_vector: {observations['vector']}")
+                        print(f"observations_vector:\n{observations['vector']}")
                         print(
                             f"observations_vector.shape: {observations['vector'].shape}"
                         )
                     if "image" in observations:
                         import cv2
 
-                        cv2.imshow("image_obs", observations["image"])
+                        cv2.imshow("image_obs", observations["image"][..., ::-1])
                         cv2.waitKey(1)
                         print(
                             f"observations_image.shape: {observations['image'].shape}"
@@ -1006,6 +1001,8 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             "decoder.mlp_keys": "vector",
             "encoder.cnn_keys": "image",
             "decoder.cnn_keys": "image",
+            "encoder.minres": 6,
+            "decoder.minres": 6,
             # "encoder.mlp_keys": ".*",
             # "decoder.mlp_keys": ".*",
             # "encoder.cnn_keys": "$^",

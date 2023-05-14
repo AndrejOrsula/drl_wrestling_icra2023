@@ -24,7 +24,7 @@ class SonarRight(__SonarSensor):
 
 
 class SonarSensorsCombined:
-    # TODO: Adjust limits of sonars
+    MIN_DISTANCE: float = 0.25
     MAX_DISTANCE: float = 2.55
 
     def __init__(self, robot: Robot, time_step: float):
@@ -42,23 +42,14 @@ class SonarSensorsCombined:
         )
 
     def get_distance_normalized(self) -> np.ndarray:
-        return np.array(
+        out = np.array(
             [
-                self.sonar_left.get_distance() / self.MAX_DISTANCE,
-                self.sonar_right.get_distance() / self.MAX_DISTANCE,
+                self.sonar_left.get_distance(),
+                self.sonar_right.get_distance(),
             ],
             dtype=np.float32,
         )
-        # TODO: Adjust normalization of out-of-range values
-        # out = (
-        #     np.array(
-        #         [
-        #             self.sonar_left.get_distance(),
-        #             self.sonar_right.get_distance(),
-        #         ],
-        #         dtype=np.float32,
-        #     )
-        #     / self.MAX_DISTANCE
-        # )
-        # out[out >= 1.0] = -1.0
-        # return out
+        out[out <= self.MIN_DISTANCE] = 0.0
+        out /= self.MAX_DISTANCE
+        out[out >= 1.0] = -1.0
+        return out

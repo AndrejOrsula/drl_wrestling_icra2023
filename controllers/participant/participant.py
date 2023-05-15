@@ -43,7 +43,7 @@ class SpaceBot(Robot):
 
     EMULATE_STARTUP_DELAY_DURING_TRAINING: bool = True
     STARTUP_DELAY_MIN: float = 0.5
-    STARTUP_DELAY_MAX: float = 5.0
+    STARTUP_DELAY_MAX: float = 4.0
 
     MIN_POS_FLOAT: float = np.nextafter(0.0, 1)
 
@@ -471,6 +471,11 @@ class SpaceBot(Robot):
                 force_obs_norm = self.force_sensors.get_force_normalized()
             if self.observation_vector_enable_touch:
                 touch_obs_norm = self.touch_sensors.get_touch_normalized()
+            is_action_being_replayed = (
+                0.0
+                if self._is_action_being_replayed == self.MIN_POS_FLOAT
+                else self._is_action_being_replayed
+            )
             vector_obs = np.hstack(
                 (
                     joint_pos_obs_norm,
@@ -478,7 +483,7 @@ class SpaceBot(Robot):
                     sonar_obs_norm,
                     force_obs_norm,
                     touch_obs_norm,
-                    self._is_action_being_replayed,
+                    is_action_being_replayed,
                 )
             )
         if self.observation_image_enable:

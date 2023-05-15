@@ -41,7 +41,7 @@ class SpaceBot(Robot):
     LED_HUE_DELTA: float = 0.015625
 
     EMULATE_STARTUP_DELAY_DURING_TRAINING: bool = True
-    STARTUP_DELAY_MIN: float = 5.0
+    STARTUP_DELAY_MIN: float = 0.0
     STARTUP_DELAY_MAX: float = 10.0
 
     def __init__(
@@ -156,7 +156,7 @@ class SpaceBot(Robot):
             self.observation_image_channels = 3
 
         # Filters
-        self.rolling_average_acceleration = RollingAverage(window_size=5)
+        self.rolling_average_acceleration = RollingAverage(window_size=4)
 
         ## Actions
         # Enable static joints that are not controlled by the agent
@@ -986,31 +986,54 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
         ##
 
     config = embodied.Config(dreamerv3.configs["defaults"])
-    config = config.update(dreamerv3.configs["small"])
     config = config.update(
         {
             "logdir": os.path.join(
                 os.path.abspath(os.path.dirname(__file__)), "logdir"
             ),
-            "batch_size": 16,
-            "imag_horizon": 15,
-            "run.train_ratio": 1024,
-            "run.log_every": 300,
-            "encoder.mlp_keys": "vector",
-            "decoder.mlp_keys": "vector",
-            "encoder.cnn_keys": "image",
-            "decoder.cnn_keys": "image",
-            "encoder.minres": 6,
-            "decoder.minres": 6,
-            # "encoder.mlp_keys": ".*",
-            # "decoder.mlp_keys": ".*",
-            # "encoder.cnn_keys": "$^",
-            # "decoder.cnn_keys": "$^",
-            "rssm.deter": 1024,
-            "jax.platform": "cpu",
+            "replay_size": 5e6,
+            # "jax.platform": "cpu",
             # "jax.jit": False,
-            "jax.prealloc": train,
             "jax.precision": "float16",
+            "jax.prealloc": train,
+            "run.steps": 1e8,
+            "run.log_every": 600,
+            "run.train_ratio": 1024,
+            "batch_size": 32,
+            "batch_length": 64,
+            "imag_horizon": 15,
+            # rssm
+            "rssm.deter": 512,
+            "rssm.units": 512,
+            "rssm.stoch": 32,
+            "rssm.classes": 32,
+            # encoder/decoder
+            "encoder.mlp_keys": "vector",
+            "encoder.cnn_keys": "image",
+            "encoder.mlp_layers": 2,
+            "encoder.mlp_units": 256,
+            "encoder.cnn_depth": 8,
+            "encoder.minres": 6,
+            "decoder.mlp_keys": "vector",
+            "decoder.cnn_keys": "image",
+            "decoder.mlp_layers": 2,
+            "decoder.mlp_units": 256,
+            "decoder.cnn_depth": 8,
+            "decoder.minres": 6,
+            # actor/critic
+            "actor.layers": 2,
+            "actor.units": 256,
+            "critic.layers": 2,
+            "critic.units": 512,
+            # reward
+            "reward_head.layers": 2,
+            "reward_head.units": 512,
+            # cont
+            "cont_head.layers": 2,
+            "cont_head.units": 512,
+            # disag
+            "disag_head.layers": 2,
+            "disag_head.units": 512,
         }
     )
     if not train:

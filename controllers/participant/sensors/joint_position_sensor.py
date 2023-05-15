@@ -14,8 +14,9 @@ class _PositionSensor:
         device_name: Optional[str] = None,
         motor: Optional[Motor] = None,
     ):
-        if device_name is not None:
-            self.device: PositionSensor = robot.getDevice(device_name)
+        self.__device_name = device_name
+        if self.__device_name is not None:
+            self.device: PositionSensor = robot.getDevice(self.__device_name)
         elif motor is not None:
             self.device = motor.getPositionSensor()
         else:
@@ -24,6 +25,10 @@ class _PositionSensor:
 
         self._low = getattr(joint_limits, f"{self.device.getName()[:-1]}Low")
         self._high = getattr(joint_limits, f"{self.device.getName()[:-1]}High")
+
+    @property
+    def device_name(self) -> str:
+        return self.__device_name
 
     @property
     def low(self) -> float:
@@ -348,6 +353,12 @@ class JointPositionSensorsCombined:
                 ]
             )
         self.__position_sensors = tuple(self.__position_sensors)
+
+    @property
+    def device_names(self) -> Tuple[str]:
+        return tuple(
+            [position_sensor.device_name for position_sensor in self.__position_sensors]
+        )
 
     @property
     def position_sensors(self) -> Tuple[_PositionSensor, ...]:

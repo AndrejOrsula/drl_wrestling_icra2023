@@ -5,6 +5,16 @@ HeadYawHigh = 2.08567
 HeadPitchLow = -0.671952
 HeadPitchHigh = 0.514872
 
+
+LShoulderPitchLow = -2.08567
+LShoulderPitchHigh = 2.08567
+LShoulderRollLow = -0.314159
+LShoulderRollHigh = 1.32645
+LElbowYawLow = -2.08567
+LElbowYawHigh = 2.08567
+LElbowRollLow = -1.54462
+LElbowRollHigh = 0.0
+
 RShoulderPitchLow = -2.08567
 RShoulderPitchHigh = 2.08567
 RShoulderRollLow = -1.32645
@@ -15,6 +25,8 @@ RElbowRollLow = 0.0
 RElbowRollHigh = 1.54462
 RWristYawLow = -1.82387
 RWristYawHigh = 1.82387
+
+
 RHipYawPitchLow = -1.14529
 RHipYawPitchHigh = 0.740718
 RHipRollLow = -0.738274
@@ -28,14 +40,6 @@ RAnklePitchHigh = 0.932006
 RAnkleRollLow = -0.768992
 RAnkleRollHigh = 0.397935
 
-LShoulderPitchLow = -2.08567
-LShoulderPitchHigh = 2.08567
-LShoulderRollLow = -0.314159
-LShoulderRollHigh = 1.32645
-LElbowYawLow = -2.08567
-LElbowYawHigh = 2.08567
-LElbowRollLow = -1.54462
-LElbowRollHigh = 0.0
 LWristYawLow = -1.82387
 LWristYawHigh = 1.82387
 LHipYawPitchLow = -1.14529
@@ -50,6 +54,7 @@ LAnklePitchLow = -1.18944
 LAnklePitchHigh = 0.922581
 LAnkleRollLow = -0.397880
 LAnkleRollHigh = 0.769001
+
 
 LPhalanx1Low = 0.0
 LPhalanx1High = 1.0

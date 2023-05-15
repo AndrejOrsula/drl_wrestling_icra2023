@@ -191,7 +191,7 @@ class SpaceBot(Robot):
             # Replay controller
             #   1 Action: (positive values: get_up_front, negative values: get_up_back)
             self.replay_controller = ReplayMotionController(
-                motion_list=("GetUpFront", "GetUpBack", "Stand"),
+                motion_list=("Prepare", "GetUpFrontFast", "GetUpBackFast"),
                 motion_list_reverse=(),
             )
             self._is_action_being_replayed = 0.0
@@ -307,10 +307,8 @@ class SpaceBot(Robot):
             if not self._is_agent_ready:
                 if not self._is_agent_ready_stance_taken:
                     if self._is_action_being_replayed == 0.0:
-                        self.replay_controller.play_motion_by_name("Stand")
+                        self.replay_controller.play_motion_by_name("Prepare")
                         self._is_action_being_replayed = 1.0
-                        # Note: This must be disabled based on the motion being played
-                        self._set_defensive_position()
                     elif self.replay_controller.current_motion[1].isOver():
                         self._is_agent_ready_stance_taken = True
                         self._is_action_being_replayed = 0.0
@@ -350,7 +348,10 @@ class SpaceBot(Robot):
                 overtime = time_to_sleep
 
     def apply_action(self, action: np.ndarray):
-        self._is_agent_ready = True
+        if self._is_agent_ready_stance_taken:
+            self._is_agent_ready = True
+        else:
+            return
         if self.action_use_combined_scheme:
             if self.is_training:
                 if self.step(self.time_step) == -1:
@@ -383,10 +384,10 @@ class SpaceBot(Robot):
             ):
                 if action_get_up > self.GET_UP_TRIGGER_THRESHOLD:
                     self._is_action_being_replayed = 1.0
-                    self.replay_controller.play_motion_by_name("GetUpFront")
+                    self.replay_controller.play_motion_by_name("GetUpFrontFast")
                 elif action_get_up < -self.GET_UP_TRIGGER_THRESHOLD:
                     self._is_action_being_replayed = -1.0
-                    self.replay_controller.play_motion_by_name("GetUpBack")
+                    self.replay_controller.play_motion_by_name("GetUpBackFast")
                 return
 
             ## Combine forward_backward and left_right into self.gait_heading_angle
@@ -575,41 +576,23 @@ class SpaceBot(Robot):
         self._set_default_pose_of_passive_joints()
 
     def _set_default_pose_of_passive_joints(self):
-        self.__ControllerHeadPitch.set_joint_position_normalized(0.333)
-        self.__ControllerLPhalanx1.set_joint_position_normalized(1.0)
-        self.__ControllerLPhalanx2.set_joint_position_normalized(1.0)
-        self.__ControllerLPhalanx3.set_joint_position_normalized(1.0)
-        self.__ControllerLPhalanx4.set_joint_position_normalized(1.0)
-        self.__ControllerLPhalanx5.set_joint_position_normalized(1.0)
-        self.__ControllerLPhalanx6.set_joint_position_normalized(1.0)
-        self.__ControllerLPhalanx7.set_joint_position_normalized(-1.0)
-        self.__ControllerLPhalanx8.set_joint_position_normalized(-1.0)
-        self.__ControllerRPhalanx1.set_joint_position_normalized(1.0)
-        self.__ControllerRPhalanx2.set_joint_position_normalized(1.0)
-        self.__ControllerRPhalanx3.set_joint_position_normalized(1.0)
-        self.__ControllerRPhalanx4.set_joint_position_normalized(1.0)
-        self.__ControllerRPhalanx5.set_joint_position_normalized(1.0)
-        self.__ControllerRPhalanx6.set_joint_position_normalized(1.0)
-        self.__ControllerRPhalanx7.set_joint_position_normalized(-1.0)
-        self.__ControllerRPhalanx8.set_joint_position_normalized(-1.0)
-
-    def _set_defensive_position(self):
-        self._set_default_pose_of_passive_joints()
-        if hasattr(self, "arm_controllers"):
-            self.arm_controllers.set_joint_position_normalized(
-                [
-                    0.2,
-                    -1.0,
-                    -1.0,
-                    0.2,
-                    1.0,
-                    1.0,
-                    -0.8,
-                    -0.1,
-                    0.8,
-                    0.1,
-                ],
-            )
+        self.__ControllerHeadPitch.set_joint_position(0.12)
+        self.__ControllerLPhalanx1.set_joint_position(1.0)
+        self.__ControllerLPhalanx2.set_joint_position(1.0)
+        self.__ControllerLPhalanx3.set_joint_position(1.0)
+        self.__ControllerLPhalanx4.set_joint_position(1.0)
+        self.__ControllerLPhalanx5.set_joint_position(1.0)
+        self.__ControllerLPhalanx6.set_joint_position(1.0)
+        self.__ControllerLPhalanx7.set_joint_position(0.0)
+        self.__ControllerLPhalanx8.set_joint_position(0.0)
+        self.__ControllerRPhalanx1.set_joint_position(1.0)
+        self.__ControllerRPhalanx2.set_joint_position(1.0)
+        self.__ControllerRPhalanx3.set_joint_position(1.0)
+        self.__ControllerRPhalanx4.set_joint_position(1.0)
+        self.__ControllerRPhalanx5.set_joint_position(1.0)
+        self.__ControllerRPhalanx6.set_joint_position(1.0)
+        self.__ControllerRPhalanx7.set_joint_position(0.0)
+        self.__ControllerRPhalanx8.set_joint_position(0.0)
 
 
 class Trainer(Supervisor):

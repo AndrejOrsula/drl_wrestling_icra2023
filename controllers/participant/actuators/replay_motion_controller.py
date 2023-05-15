@@ -18,14 +18,16 @@ class ReplayMotionController:
         motion_list: Optional[Tuple[str, ...]] = None,
         motion_list_reverse: Optional[Tuple[str, ...]] = None,
     ):
-        # TODO: Make custom stand up motions
         self.library = MotionLibrary()
         self.__motion_list = (
             (
                 "Flip",
                 "ForwardLoop",
                 "GetUpBack",
+                "GetUpBackFast",
                 "GetUpFront",
+                "GetUpFrontFast",
+                "Prepare",
                 "PunchL",
                 "PunchR",
                 "Shove",

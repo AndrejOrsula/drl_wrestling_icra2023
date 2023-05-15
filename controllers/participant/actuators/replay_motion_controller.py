@@ -27,7 +27,7 @@ class ReplayMotionController:
                 "GetUpBackFast",
                 "GetUpFront",
                 "GetUpFrontFast",
-                "Prepare",
+                "InitialStance",
                 "PunchL",
                 "PunchR",
                 "Shove",
@@ -116,3 +116,9 @@ class ReplayMotionController:
         if self.__current_motion is not None:
             self.__current_motion[1].stop()
             self.__current_motion = None
+
+    def is_current_motion_over(self) -> bool:
+        return self.__current_motion is None or self.__current_motion[1].isOver()
+
+    def is_current_motion_over_must_exist(self) -> bool:
+        return self.__current_motion is not None and self.__current_motion[1].isOver()

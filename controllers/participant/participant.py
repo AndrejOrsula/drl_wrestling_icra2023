@@ -191,7 +191,8 @@ class SpaceBot(Robot):
             # Replay controller
             #   1 Action: (positive values: get_up_front, negative values: get_up_back)
             self.replay_controller = ReplayMotionController(
-                motion_list=("Prepare", "GetUpFrontFast", "GetUpBackFast"),
+                wait_until_finished=True,
+                motion_list=("InitialStance", "GetUpFrontFast", "GetUpBackFast"),
                 motion_list_reverse=(),
             )
             self._is_action_being_replayed = 0.0
@@ -352,6 +353,7 @@ class SpaceBot(Robot):
             self._is_agent_ready = True
         else:
             return
+
         if self.action_use_combined_scheme:
             if self.is_training:
                 if self.step(self.time_step) == -1:

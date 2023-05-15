@@ -984,6 +984,9 @@ class ParticipantEnv(gym.Env):
 
 
 def dreamerv3(train: bool = TRAIN, **kwargs):
+    # Begin with creating the environment to start before taking the time to import dreamerv3
+    env = ParticipantEnv(train=train, **kwargs)
+
     import dreamerv3
     from dreamerv3 import embodied
     from embodied.envs import from_gym
@@ -1067,25 +1070,11 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
     config = embodied.Flags(config).parse()
     logdir = embodied.Path(config.logdir)
     step = embodied.Counter()
-    logger = embodied.Logger(
-        step,
-        [
-            # embodied.logger.TerminalOutput(),
-            # embodied.logger.JSONLOutput(logdir, "metrics.jsonl"),
-            embodied.logger.TensorBoardOutput(logdir),
-            # embodied.logger.WandBOutput(logdir.name, config),
-            # embodied.logger.MLFlowOutput(logdir.name),
-        ],
-    )
 
-    env = ParticipantEnv(train=True, **kwargs)
     env = from_gym.FromGym(env, obs_key="vector")
     env = dreamerv3.wrap_env(env, config)
     env = embodied.BatchEnv([env], parallel=False)
     agent = dreamerv3.Agent(env.obs_space, env.act_space, step, config)
-    replay = embodied.replay.Uniform(
-        config.batch_length, config.replay_size, logdir / "replay"
-    )
     args = embodied.Config(
         **config.run,
         logdir=config.logdir,
@@ -1093,6 +1082,19 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
     )
 
     if train:
+        replay = embodied.replay.Uniform(
+            config.batch_length, config.replay_size, logdir / "replay"
+        )
+        logger = embodied.Logger(
+            step,
+            [
+                # embodied.logger.TerminalOutput(),
+                # embodied.logger.JSONLOutput(logdir, "metrics.jsonl"),
+                embodied.logger.TensorBoardOutput(logdir),
+                # embodied.logger.WandBOutput(logdir.name, config),
+                # embodied.logger.MLFlowOutput(logdir.name),
+            ],
+        )
         embodied.run.train(agent, env, replay, logger, args)
     else:
         driver = embodied.Driver(env)

@@ -34,6 +34,7 @@ if os.environ.get("CI"):
 class SpaceBot(Robot):
     MAX_TURNING_RADIUS: float = 2.0
     MIN_TURNING_RADIUS: float = 0.25
+    TURNING_RADIUS_STRAIGHT: float = 100000.0
 
     GET_UP_TRIGGER_THRESHOLD: float = 0.75
     GET_UP_MIN_XY_ACCELERATION_MAGNITUDE: float = 5.0
@@ -41,8 +42,10 @@ class SpaceBot(Robot):
     LED_HUE_DELTA: float = 0.015625
 
     EMULATE_STARTUP_DELAY_DURING_TRAINING: bool = True
-    STARTUP_DELAY_MIN: float = 0.0
-    STARTUP_DELAY_MAX: float = 10.0
+    STARTUP_DELAY_MIN: float = 0.5
+    STARTUP_DELAY_MAX: float = 5.0
+
+    MIN_POS_FLOAT: float = np.nextafter(0.0, 1)
 
     def __init__(
         self,
@@ -180,7 +183,7 @@ class SpaceBot(Robot):
             self.gait_controller = SlideGaitController(
                 robot=self, time_step=self.time_step
             )
-            self.gait_desired_radius = 100000.0
+            self.gait_desired_radius = self.TURNING_RADIUS_STRAIGHT
             self.gait_heading_angle = 0.0
             # self.gait_step_amplitude = 1.0
             self.action_gait_controller_input_size = 3
@@ -209,7 +212,8 @@ class SpaceBot(Robot):
             # Start the background thread of the low-level controller
             self._is_agent_ready = False
             self._is_agent_ready_stance_taken = False
-            self._thread = threading.Thread(target=self.low_level_controller)
+            self._thread = threading.Thread(target=self.__low_level_controller_thread)
+            self._thread_mutex = threading.Lock()
             self._thread.start()
 
             # Joint controllers
@@ -295,58 +299,56 @@ class SpaceBot(Robot):
                 reward_coverage_delta_opponent=reward_coverage_delta_opponent,
             )
 
-    def low_level_controller(self):
-        overtime: float = 0.0
+    def __low_level_controller_thread(self):
         while True:
-            time_before: float = time.time()
+            with self._thread_mutex:
+                self.low_level_controller()
+                if self.step(self.time_step) == -1:
+                    break
 
-            if self.step(self.time_step) == -1:
-                break
+            time.sleep(self.MIN_POS_FLOAT)
 
-            ## Until the agent is ready, perform manual actions
-            # self.replay_controller.set_wait_until_finished(self._is_agent_ready)
-            if not self._is_agent_ready:
-                if not self._is_agent_ready_stance_taken:
-                    if self._is_action_being_replayed == 0.0:
-                        self.replay_controller.play_motion_by_name("Prepare")
-                        self._is_action_being_replayed = 1.0
-                    elif self.replay_controller.current_motion[1].isOver():
-                        self._is_agent_ready_stance_taken = True
-                        self._is_action_being_replayed = 0.0
-                else:
-                    self.gait_controller.set_step_amplitude(0.5)
-                    self.gait_controller.command_to_motors(
-                        desired_radius=100000.0,
-                        heading_angle=0.0,
-                    )
-
+    def low_level_controller(self):
+        ## Until the agent is ready, perform manual actions
+        if not self._is_agent_ready:
+            if not self._is_agent_ready_stance_taken:
+                # First, take the initial stance
+                if self._is_action_being_replayed == 0.0:
+                    self.replay_controller.play_motion_by_name("InitialStance")
+                    self._is_action_being_replayed = self.MIN_POS_FLOAT
+                elif (
+                    self.replay_controller.is_current_motion_over_must_exist()
+                    and self.replay_controller.current_motion[0] == "InitialStance"
+                ):
+                    self._is_agent_ready_stance_taken = True
+                elif self.replay_controller.is_current_motion_over():
+                    self._is_action_being_replayed = 0.0
             else:
-                ## Only play gait if the agent is ready and no action is being replayed
-                if self._is_action_being_replayed != 0.0:
-                    if self.replay_controller.current_motion[1].isOver():
-                        self._is_action_being_replayed = 0.0
-                else:
-                    self.gait_controller.set_step_amplitude(1.0)
-                    self.gait_controller.command_to_motors(
-                        desired_radius=self.gait_desired_radius,
-                        heading_angle=self.gait_heading_angle,
-                    )
+                # Then, just walk forward slowly
+                self.gait_controller.set_step_amplitude(0.5)
+                self.gait_controller.command_to_motors(
+                    desired_radius=self.TURNING_RADIUS_STRAIGHT,
+                    heading_angle=0.0,
+                )
+        else:
+            # Indicate that the action being replayed is over when detected
+            if (
+                self._is_action_being_replayed != 0.0
+                and self.replay_controller.is_current_motion_over()
+            ):
+                self._is_action_being_replayed = 0.0
+            # Only walk and set default pose of passive joints when not replaying a motion
+            if self._is_action_being_replayed == 0.0:
+                self.gait_controller.set_step_amplitude(1.0)
+                self.gait_controller.command_to_motors(
+                    desired_radius=self.gait_desired_radius,
+                    heading_angle=self.gait_heading_angle,
+                )
+                self._set_default_pose_of_passive_joints()
 
-                    self._set_default_pose_of_passive_joints()
-
-                ## Change hue of the LEDs
-                self.led_hue = (self.led_hue + self.LED_HUE_DELTA) % 1.0
-                self.led_controllers.set_color_hsv(self.led_hue, 1.0, 1.0)
-
-            ## Wait for the time step to finish
-            time_to_sleep = self.TIME_STEP - (time.time() - time_before)
-            if time_to_sleep > 0.0:
-                time_to_sleep += overtime
-                overtime = 0.0
-                if time_to_sleep > 0.0:
-                    time.sleep(time_to_sleep)
-            else:
-                overtime = time_to_sleep
+            # Change hue of the LEDs
+            self.led_hue = (self.led_hue + self.LED_HUE_DELTA) % 1.0
+            self.led_controllers.set_color_hsv(self.led_hue, 1.0, 1.0)
 
     def apply_action(self, action: np.ndarray):
         if self._is_agent_ready_stance_taken:
@@ -355,10 +357,6 @@ class SpaceBot(Robot):
             return
 
         if self.action_use_combined_scheme:
-            if self.is_training:
-                if self.step(self.time_step) == -1:
-                    return
-
             if self._is_action_being_replayed != 0.0:
                 return
 
@@ -399,7 +397,7 @@ class SpaceBot(Robot):
 
             ## Convert turn to self.gait_desired_radius
             if abs(action_turn) < self.MIN_TURNING_RADIUS:
-                self.gait_desired_radius = 100000.0
+                self.gait_desired_radius = self.TURNING_RADIUS_STRAIGHT
             elif action_turn > 0.0:
                 self.gait_desired_radius = np.interp(
                     action_turn,
@@ -513,10 +511,7 @@ class SpaceBot(Robot):
 
         if self.is_training:
             self.trainer.reset()
-            for _ in range(2):
-                self.replay_controller.stop_current_motion()
-                self.replay_controller.play_motion_by_name("Prepare")
-                self.step(self.time_step)
+            self.replay_controller.stop_current_motion()
 
             if self.EMULATE_STARTUP_DELAY_DURING_TRAINING:
                 time.sleep(
@@ -575,7 +570,6 @@ class SpaceBot(Robot):
         self.__ControllerRPhalanx8 = ControllerRPhalanx8(
             robot=self, time_step=self.time_step
         )
-        self._set_default_pose_of_passive_joints()
 
     def _set_default_pose_of_passive_joints(self):
         self.__ControllerHeadPitch.set_joint_position(0.12)
@@ -835,6 +829,8 @@ class ParticipantEnv(gym.Env):
     def __init__(self, train: bool = TRAIN, **kwargs):
         self.robot = SpaceBot(train=train, **kwargs)
 
+        self.__is_first_reset_done = False
+
     @property
     def observation_space(self):
         if self.robot.observation_vector_enable:
@@ -907,14 +903,33 @@ class ParticipantEnv(gym.Env):
         return (-100.0, 100.0)
 
     def step(self, action):
-        self.robot.apply_action(action)
-        obs = self.robot.get_observations()
-        reward, is_done = self.robot.get_reward()
+        if self.robot._thread_mutex.acquire(blocking=False):
+            try:
+                self.robot.apply_action(action)
+                self.robot.low_level_controller()
+
+                if self.robot.step(self.robot.time_step) == -1:
+                    sys.exit(0)
+
+                obs = self.robot.get_observations()
+                reward, is_done = self.robot.get_reward()
+            finally:
+                self.robot._thread_mutex.release()
+        else:
+            with self.robot._thread_mutex:
+                self.robot.apply_action(action)
+                obs = self.robot.get_observations()
+                reward, is_done = self.robot.get_reward()
+
         info = {}
         return obs, reward, is_done, info
 
     def reset(self):
-        self.robot.reset()
+        if not self.__is_first_reset_done:
+            self.__is_first_reset_done = True
+        else:
+            self.robot.reset()
+
         return self.robot.get_observations()
 
     def render(self, mode="human"):

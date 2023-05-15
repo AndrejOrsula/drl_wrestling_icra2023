@@ -14,6 +14,8 @@ LElbowYawLow = -2.08567
 LElbowYawHigh = 2.08567
 LElbowRollLow = -1.54462
 LElbowRollHigh = 0.0
+LWristYawLow = -1.82387
+LWristYawHigh = 1.82387
 
 RShoulderPitchLow = -2.08567
 RShoulderPitchHigh = 2.08567
@@ -40,8 +42,6 @@ RAnklePitchHigh = 0.932006
 RAnkleRollLow = -0.768992
 RAnkleRollHigh = 0.397935
 
-LWristYawLow = -1.82387
-LWristYawHigh = 1.82387
 LHipYawPitchLow = -1.14529
 LHipYawPitchHigh = 0.740718
 LHipRollLow = -0.379435

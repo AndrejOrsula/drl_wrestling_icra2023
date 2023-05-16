@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import constants.joint_limits as joint_limits
+
 from .kinematics import Kinematics
 from .slide_gait_generator import SlideGaitGenerator
 
@@ -32,6 +34,20 @@ class SlideGaitController:
         ]
         self.L_leg_motors = [robot.getDevice(f"L{joint}") for joint in joints]
         self.R_leg_motors = [robot.getDevice(f"R{joint}") for joint in joints]
+        self.L_limits = [
+            (
+                getattr(joint_limits, f"L{joint}Low"),
+                getattr(joint_limits, f"L{joint}High"),
+            )
+            for joint in joints
+        ]
+        self.R_limits = [
+            (
+                getattr(joint_limits, f"R{joint}Low"),
+                getattr(joint_limits, f"R{joint}High"),
+            )
+            for joint in joints
+        ]
 
     def reset(self):
         self.gait_generator.reset()
@@ -56,8 +72,10 @@ class SlideGaitController:
         right_target_commands = self.kinematics.inverse_leg(
             x * 1e3, y * 1e3, z * 1e3, 0, 0, yaw, is_left=False
         )
-        for command, motor in zip(right_target_commands, self.R_leg_motors):
-            motor.setPosition(command)
+        for command, motor, limits in zip(
+            right_target_commands, self.R_leg_motors, self.R_limits
+        ):
+            motor.setPosition(min(max(command, limits[0]), limits[1]))
 
         x, y, z, yaw = self.gait_generator.compute_leg_position(
             is_left=True, desired_radius=desired_radius, heading_angle=heading_angle
@@ -65,5 +83,7 @@ class SlideGaitController:
         left_target_commands = self.kinematics.inverse_leg(
             x * 1e3, y * 1e3, z * 1e3, 0, 0, yaw, is_left=True
         )
-        for command, motor in zip(left_target_commands, self.L_leg_motors):
-            motor.setPosition(command)
+        for command, motor, limits in zip(
+            left_target_commands, self.L_leg_motors, self.L_limits
+        ):
+            motor.setPosition(min(max(command, limits[0]), limits[1]))

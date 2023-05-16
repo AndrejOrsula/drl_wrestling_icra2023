@@ -9,6 +9,7 @@ This controller employs a policy trained via Model-Based Reinforcement Learning 
 |  Model  |                      Algorithm                       |           Observation Space            |  Action Space   | Size of Policy (Actor) |
 | :-----: | :--------------------------------------------------: | :------------------------------------: | :-------------: | :--------------------: |
 | model01 | [DreamerV3](https://arxiv.org/abs/2301.04104) (MBRL) | Visual (32x32x3) + Proprioceptive (23) | Continuous (17) |   1330210 parameters   |
+| model02 | [DreamerV3](https://arxiv.org/abs/2301.04104) (MBRL) | Visual (24x24x3) + Proprioceptive (38) | Continuous (15) |   467468 parameters    |
 
 ## Team
 

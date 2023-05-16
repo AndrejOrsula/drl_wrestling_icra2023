@@ -988,6 +988,17 @@ class ParticipantEnv(gym.Env):
                 print(f"done: {done}")
 
 
+def __get_cmd_stdout(cmd) -> str:
+    import subprocess
+
+    try:
+        info = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        info = info.decode("utf8")
+    except Exception as err:
+        info = f"Executing '{cmd}' failed: {err}"
+    return info.strip()
+
+
 def dreamerv3(train: bool = TRAIN, **kwargs):
     _time_start = time.time()
 
@@ -1080,7 +1091,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
                 "run.from_checkpoint": os.path.join(
                     os.path.abspath(os.path.dirname(__file__)),
                     "models",
-                    "model01.ckpt",
+                    "model02.ckpt",
                 ),
             }
         )
@@ -1123,22 +1134,12 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
 
         # TODO: Remove debug time prints
         print(time.time() - _time_start)
+        print(__get_cmd_stdout(["nvidia-smi"]))
 
         while True:
             _time_before = time.time()
             driver._step(policy, 0, 0)
             print(f"{time.time() - _time_before:.3f}", flush=True)
-
-
-def __get_cmd_stdout(cmd) -> str:
-    import subprocess
-
-    try:
-        info = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        info = info.decode("utf8")
-    except Exception as err:
-        info = f"Executing '{cmd}' failed: {err}"
-    return info.strip()
 
 
 if __name__ == "__main__":

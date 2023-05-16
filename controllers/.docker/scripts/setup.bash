@@ -11,3 +11,4 @@ wget -q https://raw.githubusercontent.com/danijar/dreamerv3/main/dreamerv3/confi
 pip3 install -qqq --no-cache-dir gdown
 mkdir -p /usr/local/webots-project/controllers/participant/models
 gdown -q 15gZJPC3yW-vfb8s4dJfxkPJR8U8NFEtA -O /usr/local/webots-project/controllers/participant/models/model01.ckpt
+gdown -q 1U6rrviCF50wF20z9w-MrlUWSqyVlecVO -O /usr/local/webots-project/controllers/participant/models/model02.ckpt

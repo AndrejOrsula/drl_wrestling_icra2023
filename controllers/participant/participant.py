@@ -325,7 +325,7 @@ class SpaceBot(Robot):
                     self._is_action_being_replayed = 0.0
             else:
                 # Then, just walk forward slowly
-                self.gait_controller.set_step_amplitude(0.25)
+                self.gait_controller.set_step_amplitude(0.5)
                 self.gait_controller.command_to_motors(
                     desired_radius=self.TURNING_RADIUS_STRAIGHT,
                     heading_angle=0.0,
@@ -1012,17 +1012,17 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
     ## Apply monkey patch to accommodate multiple agents running in parallel
     if train:
         XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.38"
+        __monkey_patch__setup_original = dreamerv3.Agent._setup
+
+        def __monkey_patch__setup(self):
+            __monkey_patch__setup_original(self)
+            os.environ[
+                "XLA_PYTHON_CLIENT_MEM_FRACTION"
+            ] = XLA_PYTHON_CLIENT_MEM_FRACTION
+
+        dreamerv3.Agent._setup = __monkey_patch__setup
+        ##
     else:
-        XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.3"
-    __monkey_patch__setup_original = dreamerv3.Agent._setup
-
-    def __monkey_patch__setup(self):
-        __monkey_patch__setup_original(self)
-        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = XLA_PYTHON_CLIENT_MEM_FRACTION
-
-    dreamerv3.Agent._setup = __monkey_patch__setup
-    ##
-    if not train:
         ## Apply monkey patch to speed up initialization for inference
         def __monkey_patch__init_varibs(self, obs_space, act_space):
             rng = self._next_rngs(self.train_devices, mirror=True)
@@ -1044,7 +1044,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             # "jax.platform": "cpu",
             # "jax.jit": False,
             "jax.precision": "float16",
-            # "jax.prealloc": train,
+            "jax.prealloc": train,
             "run.steps": 1e8,
             "run.log_every": 600,
             "run.train_ratio": 1024,

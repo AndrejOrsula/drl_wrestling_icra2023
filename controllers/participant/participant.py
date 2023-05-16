@@ -325,7 +325,7 @@ class SpaceBot(Robot):
                     self._is_action_being_replayed = 0.0
             else:
                 # Then, just walk forward slowly
-                self.gait_controller.set_step_amplitude(0.5)
+                self.gait_controller.set_step_amplitude(0.25)
                 self.gait_controller.command_to_motors(
                     desired_radius=self.TURNING_RADIUS_STRAIGHT,
                     heading_angle=0.0,
@@ -989,6 +989,8 @@ class ParticipantEnv(gym.Env):
 
 
 def dreamerv3(train: bool = TRAIN, **kwargs):
+    _time_start = time.time()
+
     # Begin with creating the environment to start before taking the time to import dreamerv3
     env = ParticipantEnv(train=train, **kwargs)
 
@@ -999,15 +1001,26 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
     ## Apply monkey patch to accommodate multiple agents running in parallel
     if train:
         XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.38"
-        __monkey_patch__setup_original = dreamerv3.Agent._setup
+    else:
+        XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.3"
+    __monkey_patch__setup_original = dreamerv3.Agent._setup
 
-        def __monkey_patch__setup(self):
-            __monkey_patch__setup_original(self)
-            os.environ[
-                "XLA_PYTHON_CLIENT_MEM_FRACTION"
-            ] = XLA_PYTHON_CLIENT_MEM_FRACTION
+    def __monkey_patch__setup(self):
+        __monkey_patch__setup_original(self)
+        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = XLA_PYTHON_CLIENT_MEM_FRACTION
 
-        dreamerv3.Agent._setup = __monkey_patch__setup
+    dreamerv3.Agent._setup = __monkey_patch__setup
+    ##
+    if not train:
+        ## Apply monkey patch to speed up initialization for inference
+        def __monkey_patch__init_varibs(self, obs_space, act_space):
+            rng = self._next_rngs(self.train_devices, mirror=True)
+            obs = self._dummy_batch(obs_space, (1,))
+            state, varibs = self._init_policy({}, rng, obs["is_first"])
+            varibs = self._policy(varibs, rng, obs, state, mode="eval", init_only=True)
+            return varibs
+
+        dreamerv3.jaxagent.JAXAgent._init_varibs = __monkey_patch__init_varibs
         ##
 
     config = embodied.Config(dreamerv3.configs["defaults"])
@@ -1020,7 +1033,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             # "jax.platform": "cpu",
             # "jax.jit": False,
             "jax.precision": "float16",
-            "jax.prealloc": train,
+            # "jax.prealloc": train,
             "run.steps": 1e8,
             "run.log_every": 600,
             "run.train_ratio": 1024,
@@ -1107,6 +1120,9 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
         checkpoint.agent = agent
         checkpoint.load(args.from_checkpoint, keys=["agent"])
         policy = lambda *args: agent.policy(*args, mode="eval")
+
+        # TODO: Remove debug time prints
+        print(time.time() - _time_start)
 
         while True:
             _time_before = time.time()

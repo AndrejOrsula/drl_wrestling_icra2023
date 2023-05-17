@@ -47,7 +47,11 @@ while true; do
     done
     if [ "${SHOULD_KILL}" = "true" ]; then
         echo -e "Killing the process..."
-        kill -- -$(ps -o pgid= $PID | grep -o [0-9]*) > /dev/null 2>&1
+        for _ in $(seq 1 2); do
+            kill -- -$(ps -o pgid= $PID | grep -o [0-9]*) > /dev/null 2>&1
+            sleep 5
+        done
+        kill -9 -- -$(ps -o pgid= $PID | grep -o [0-9]*) > /dev/null 2>&1
         sleep "${SLEEP_TIME_POST_KILL}"
     fi
 

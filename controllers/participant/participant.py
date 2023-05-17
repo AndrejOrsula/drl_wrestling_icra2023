@@ -37,7 +37,8 @@ class SpaceBot(Robot):
     TURNING_RADIUS_STRAIGHT: float = 100000.0
 
     GET_UP_TRIGGER_THRESHOLD: float = 0.75
-    GET_UP_MIN_XY_ACCELERATION_MAGNITUDE: float = 5.0
+    GET_UP_MIN_XY_ACCELERATION_MAGNITUDE: float = 7.0
+    GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE: float = 4.0
 
     LED_HUE_DELTA: float = 0.015625
 
@@ -72,6 +73,7 @@ class SpaceBot(Robot):
         action_joints_relative: bool = True,
         action_joints_relative_scaling: float = 0.5,
         include_fingers: bool = False,
+        include_get_up_action: bool = False,
         ## Training
         train: bool = TRAIN,
         reward_for_each_step_standing: float = 1.0,
@@ -159,7 +161,7 @@ class SpaceBot(Robot):
             self.observation_image_channels = 3
 
         # Filters
-        self.rolling_average_acceleration = RollingAverage(window_size=4)
+        self.rolling_average_acceleration_xy = RollingAverage(window_size=10)
 
         ## Actions
         # Enable static joints that are not controlled by the agent
@@ -193,13 +195,16 @@ class SpaceBot(Robot):
 
             # Replay controller
             #   1 Action: (positive values: get_up_front, negative values: get_up_back)
+            self.include_get_up_action = include_get_up_action
             self.replay_controller = ReplayMotionController(
                 wait_until_finished=True,
                 motion_list=("InitialStance", "GetUpFrontFast", "GetUpBackFast"),
                 motion_list_reverse=(),
             )
             self._is_action_being_replayed = 0.0
-            self.action_replay_controller_input_size = 1
+            self.action_replay_controller_input_size = (
+                1 if self.include_get_up_action else 0
+            )
             self.action_replay_controller_indices = [
                 i
                 for i in range(
@@ -305,6 +310,7 @@ class SpaceBot(Robot):
                 self.low_level_controller()
                 if self.step(self.time_step) == -1:
                     break
+                self.update_filters()
 
             time.sleep(self.MIN_POS_FLOAT)
 
@@ -350,6 +356,11 @@ class SpaceBot(Robot):
             self.led_hue = (self.led_hue + self.LED_HUE_DELTA) % 1.0
             self.led_controllers.set_color_hsv(self.led_hue, 1.0, 1.0)
 
+    def update_filters(self):
+        self.rolling_average_acceleration_xy.append(
+            self.imu.accelerometer.get_linear_acceleration()[:2]
+        )
+
     def apply_action(self, action: np.ndarray):
         if self._is_agent_ready_stance_taken:
             self._is_agent_ready = True
@@ -371,23 +382,36 @@ class SpaceBot(Robot):
             action_hands = action[self.action_hand_controllers_indices]
             action_arms = action[self.action_arm_controllers_indices]
 
-            ## Convert get_up to action
+            ## Get-up action
+            acceleration_average_xy = (
+                self.rolling_average_acceleration_xy.update_and_get_mean()
+            )
             if (
-                np.linalg.norm(
-                    np.abs(
-                        self.rolling_average_acceleration(
-                            self.imu.accelerometer.get_linear_acceleration()
-                        )[:2]
-                    )
-                )
+                np.linalg.norm(np.abs(acceleration_average_xy))
                 > self.GET_UP_MIN_XY_ACCELERATION_MAGNITUDE
             ):
-                if action_get_up > self.GET_UP_TRIGGER_THRESHOLD:
-                    self._is_action_being_replayed = 1.0
-                    self.replay_controller.play_motion_by_name("GetUpFrontFast")
-                elif action_get_up < -self.GET_UP_TRIGGER_THRESHOLD:
-                    self._is_action_being_replayed = -1.0
-                    self.replay_controller.play_motion_by_name("GetUpBackFast")
+                if self.include_get_up_action:
+                    ## Convert get_up to action
+                    if action_get_up > self.GET_UP_TRIGGER_THRESHOLD:
+                        self._is_action_being_replayed = 1.0
+                        self.replay_controller.play_motion_by_name("GetUpFrontFast")
+                    elif action_get_up < -self.GET_UP_TRIGGER_THRESHOLD:
+                        self._is_action_being_replayed = -1.0
+                        self.replay_controller.play_motion_by_name("GetUpBackFast")
+                else:
+                    # Otherwise get up automatically based on the direction of the acceleration
+                    if (
+                        acceleration_average_xy[0]
+                        < self.GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE
+                    ):
+                        self._is_action_being_replayed = 1.0
+                        self.replay_controller.play_motion_by_name("GetUpFrontFast")
+                    elif (
+                        acceleration_average_xy[0]
+                        > self.GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE
+                    ):
+                        self._is_action_being_replayed = -1.0
+                        self.replay_controller.play_motion_by_name("GetUpBackFast")
                 return
 
             ## Combine forward_backward and left_right into self.gait_heading_angle
@@ -506,7 +530,7 @@ class SpaceBot(Robot):
             return 0.0, False
 
     def reset(self):
-        self.rolling_average_acceleration.reset()
+        self.rolling_average_acceleration_xy.reset()
 
         if self.action_use_combined_scheme:
             self.gait_controller.reset()
@@ -916,6 +940,7 @@ class ParticipantEnv(gym.Env):
                 if self.robot.step(self.robot.time_step) == -1:
                     sys.exit(0)
 
+                self.robot.update_filters()
                 obs = self.robot.get_observations()
                 reward, is_done = self.robot.get_reward()
             finally:

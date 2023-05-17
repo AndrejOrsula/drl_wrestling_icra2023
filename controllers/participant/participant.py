@@ -955,12 +955,16 @@ class ParticipantEnv(gym.Env):
         return obs, reward, is_done, info
 
     def reset(self):
-        if not self.__is_first_reset_done:
-            self.__is_first_reset_done = True
-        else:
-            self.robot.reset()
+        with self.robot._thread_mutex:
+            if not self.__is_first_reset_done:
+                self.__is_first_reset_done = True
+            else:
+                self.robot.reset()
 
-        return self.robot.get_observations()
+            if self.robot.step(self.robot.time_step) == -1:
+                sys.exit(0)
+
+            return self.robot.get_observations()
 
     def render(self, mode="human"):
         if mode == "human":
@@ -1036,7 +1040,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
 
     ## Apply monkey patch to accommodate multiple agents running in parallel
     if train:
-        XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.38"
+        XLA_PYTHON_CLIENT_MEM_FRACTION: str = "0.385"
         __monkey_patch__setup_original = dreamerv3.Agent._setup
 
         def __monkey_patch__setup(self):

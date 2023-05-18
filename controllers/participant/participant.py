@@ -78,7 +78,7 @@ class SpaceBot(Robot):
         train: bool = TRAIN,
         reward_for_each_step_standing: float = 1.0,
         reward_knockout_trainee: float = 50.0,
-        reward_knockout_opponent: float = 2.5,
+        reward_knockout_opponent: float = 1.0,
         reward_knockout_opponent_without_trainee_knockout: float = 20.0,
         max_distance_knockout_opponent: float = 0.8,
         reward_distance_from_centre: float = 1.0,
@@ -89,6 +89,8 @@ class SpaceBot(Robot):
         super().__init__()
         self.time_step = int(self.getBasicTimeStep())
         self.TIME_STEP: float = 0.001 * self.time_step
+
+        self.is_resetting: bool = False
 
         ## Observations
         self.observation_vector_enable = observation_vector_enable
@@ -197,7 +199,7 @@ class SpaceBot(Robot):
             #   1 Action: (positive values: get_up_front, negative values: get_up_back)
             self.include_get_up_action = include_get_up_action
             self.replay_controller = ReplayMotionController(
-                wait_until_finished=True,
+                wait_until_finished=False,
                 motion_list=("InitialStance", "GetUpFrontFast", "GetUpBackFast"),
                 motion_list_reverse=(),
             )
@@ -306,15 +308,48 @@ class SpaceBot(Robot):
 
     def __low_level_controller_thread(self):
         while True:
-            with self._thread_mutex:
-                self.low_level_controller()
-                if self.step(self.time_step) == -1:
-                    break
-                self.update_filters()
+            self._thread_mutex.acquire(blocking=True)
+
+            if self.is_resetting:
+                self._thread_mutex.release()
+                time.sleep(self.MIN_POS_FLOAT)
+                self.is_resetting = False
+                continue
+
+            self.low_level_controller()
+            if self.step(self.time_step) == -1:
+                break
+            self.update_filters()
+
+            self._thread_mutex.release()
 
             time.sleep(self.MIN_POS_FLOAT)
 
     def low_level_controller(self):
+        ## Automatically select get up action (only if not part of the action space)
+        # Do this only after the agent has taken the initial stance
+        if self._is_agent_ready_stance_taken and not self.include_get_up_action:
+            acceleration_average_xy = (
+                self.rolling_average_acceleration_xy.update_and_get_mean()
+            )
+            if (
+                np.linalg.norm(np.abs(acceleration_average_xy))
+                > self.GET_UP_MIN_XY_ACCELERATION_MAGNITUDE
+            ):
+                # Otherwise get up automatically based on the direction of the acceleration
+                if (
+                    acceleration_average_xy[0]
+                    < self.GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE
+                ):
+                    self._is_action_being_replayed = 1.0
+                    self.replay_controller.play_motion_by_name("GetUpFrontFast")
+                elif (
+                    acceleration_average_xy[0]
+                    > self.GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE
+                ):
+                    self._is_action_being_replayed = -1.0
+                    self.replay_controller.play_motion_by_name("GetUpBackFast")
+
         ## Until the agent is ready, perform manual actions
         if not self._is_agent_ready:
             if not self._is_agent_ready_stance_taken:
@@ -330,12 +365,19 @@ class SpaceBot(Robot):
                 elif self.replay_controller.is_current_motion_over():
                     self._is_action_being_replayed = 0.0
             else:
-                # Then, just walk forward slowly
-                self.gait_controller.set_step_amplitude(0.5)
-                self.gait_controller.command_to_motors(
-                    desired_radius=self.TURNING_RADIUS_STRAIGHT,
-                    heading_angle=0.0,
-                )
+                # Indicate that the action being replayed is over when detected
+                if (
+                    self._is_action_being_replayed != 0.0
+                    and self.replay_controller.is_current_motion_over()
+                ):
+                    self._is_action_being_replayed = 0.0
+                # Then, just walk forward slowly (if not replaying a motion)
+                if self._is_action_being_replayed == 0.0:
+                    self.gait_controller.set_step_amplitude(0.5)
+                    self.gait_controller.command_to_motors(
+                        desired_radius=self.TURNING_RADIUS_STRAIGHT,
+                        heading_angle=0.0,
+                    )
         else:
             # Indicate that the action being replayed is over when detected
             if (
@@ -383,14 +425,14 @@ class SpaceBot(Robot):
             action_arms = action[self.action_arm_controllers_indices]
 
             ## Get-up action
-            acceleration_average_xy = (
-                self.rolling_average_acceleration_xy.update_and_get_mean()
-            )
-            if (
-                np.linalg.norm(np.abs(acceleration_average_xy))
-                > self.GET_UP_MIN_XY_ACCELERATION_MAGNITUDE
-            ):
-                if self.include_get_up_action:
+            if self.include_get_up_action:
+                acceleration_average_xy = (
+                    self.rolling_average_acceleration_xy.update_and_get_mean()
+                )
+                if (
+                    np.linalg.norm(np.abs(acceleration_average_xy))
+                    > self.GET_UP_MIN_XY_ACCELERATION_MAGNITUDE
+                ):
                     ## Convert get_up to action
                     if action_get_up > self.GET_UP_TRIGGER_THRESHOLD:
                         self._is_action_being_replayed = 1.0
@@ -398,21 +440,7 @@ class SpaceBot(Robot):
                     elif action_get_up < -self.GET_UP_TRIGGER_THRESHOLD:
                         self._is_action_being_replayed = -1.0
                         self.replay_controller.play_motion_by_name("GetUpBackFast")
-                else:
-                    # Otherwise get up automatically based on the direction of the acceleration
-                    if (
-                        acceleration_average_xy[0]
-                        < self.GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE
-                    ):
-                        self._is_action_being_replayed = 1.0
-                        self.replay_controller.play_motion_by_name("GetUpFrontFast")
-                    elif (
-                        acceleration_average_xy[0]
-                        > self.GET_UP_AUTO_MIN_X_ACCELERATION_MAGNITUDE
-                    ):
-                        self._is_action_being_replayed = -1.0
-                        self.replay_controller.play_motion_by_name("GetUpBackFast")
-                return
+                    return
 
             ## Combine forward_backward and left_right into self.gait_heading_angle
             self.gait_heading_angle = np.arctan2(
@@ -530,6 +558,8 @@ class SpaceBot(Robot):
             return 0.0, False
 
     def reset(self):
+        self.is_resetting = True
+
         self.rolling_average_acceleration_xy.reset()
 
         if self.action_use_combined_scheme:
@@ -541,11 +571,6 @@ class SpaceBot(Robot):
         if self.is_training:
             self.trainer.reset()
             self.replay_controller.stop_current_motion()
-
-            if self.EMULATE_STARTUP_DELAY_DURING_TRAINING:
-                time.sleep(
-                    np.random.uniform(self.STARTUP_DELAY_MIN, self.STARTUP_DELAY_MAX)
-                )
 
     def _init_static_joints(self):
         self.__ControllerHeadPitch = ControllerHeadPitch(
@@ -934,20 +959,25 @@ class ParticipantEnv(gym.Env):
     def step(self, action):
         if self.robot._thread_mutex.acquire(blocking=False):
             try:
-                self.robot.apply_action(action)
-                self.robot.low_level_controller()
+                if self.robot.is_resetting:
+                    self.robot.is_resetting = False
+                else:
+                    self.robot.apply_action(action)
+                    self.robot.low_level_controller()
+                    if self.robot.step(self.robot.time_step) == -1:
+                        sys.exit(0)
+                    self.robot.update_filters()
 
-                if self.robot.step(self.robot.time_step) == -1:
-                    sys.exit(0)
-
-                self.robot.update_filters()
                 obs = self.robot.get_observations()
                 reward, is_done = self.robot.get_reward()
             finally:
                 self.robot._thread_mutex.release()
         else:
             with self.robot._thread_mutex:
-                self.robot.apply_action(action)
+                if self.robot.is_resetting:
+                    self.robot.is_resetting = False
+                else:
+                    self.robot.apply_action(action)
                 obs = self.robot.get_observations()
                 reward, is_done = self.robot.get_reward()
 
@@ -961,6 +991,14 @@ class ParticipantEnv(gym.Env):
             else:
                 self.robot.reset()
 
+        if self.robot.is_training and self.robot.EMULATE_STARTUP_DELAY_DURING_TRAINING:
+            time.sleep(
+                np.random.uniform(
+                    self.robot.STARTUP_DELAY_MIN, self.robot.STARTUP_DELAY_MAX
+                )
+            )
+
+        with self.robot._thread_mutex:
             if self.robot.step(self.robot.time_step) == -1:
                 sys.exit(0)
 

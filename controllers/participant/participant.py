@@ -90,8 +90,6 @@ class SpaceBot(Robot):
         self.time_step = int(self.getBasicTimeStep())
         self.TIME_STEP: float = 0.001 * self.time_step
 
-        self.is_resetting: bool = False
-
         ## Observations
         self.observation_vector_enable = observation_vector_enable
         self.observation_image_enable = observation_image_enable
@@ -308,20 +306,11 @@ class SpaceBot(Robot):
 
     def __low_level_controller_thread(self):
         while True:
-            self._thread_mutex.acquire(blocking=True)
-
-            if self.is_resetting:
-                self._thread_mutex.release()
-                time.sleep(self.MIN_POS_FLOAT)
-                self.is_resetting = False
-                continue
-
-            self.low_level_controller()
-            if self.step(self.time_step) == -1:
-                break
-            self.update_filters()
-
-            self._thread_mutex.release()
+            with self._thread_mutex:
+                self.low_level_controller()
+                if self.step(self.time_step) == -1:
+                    break
+                self.update_filters()
 
             time.sleep(self.MIN_POS_FLOAT)
 
@@ -559,7 +548,6 @@ class SpaceBot(Robot):
 
     def reset(self):
         if self.is_training:
-            self.is_resetting = True
             self.trainer.reset()
             self.rolling_average_acceleration_xy.reset()
             self.replay_controller.stop_current_motion()
@@ -957,25 +945,20 @@ class ParticipantEnv(gym.Env):
     def step(self, action):
         if self.robot._thread_mutex.acquire(blocking=False):
             try:
-                if self.robot.is_resetting:
-                    self.robot.is_resetting = False
-                else:
-                    self.robot.apply_action(action)
-                    self.robot.low_level_controller()
-                    if self.robot.step(self.robot.time_step) == -1:
-                        sys.exit(0)
-                    self.robot.update_filters()
+                self.robot.apply_action(action)
+                self.robot.low_level_controller()
 
+                if self.robot.step(self.robot.time_step) == -1:
+                    sys.exit(0)
+
+                self.robot.update_filters()
                 obs = self.robot.get_observations()
                 reward, is_done = self.robot.get_reward()
             finally:
                 self.robot._thread_mutex.release()
         else:
             with self.robot._thread_mutex:
-                if self.robot.is_resetting:
-                    self.robot.is_resetting = False
-                else:
-                    self.robot.apply_action(action)
+                self.robot.apply_action(action)
                 obs = self.robot.get_observations()
                 reward, is_done = self.robot.get_reward()
 
@@ -996,10 +979,6 @@ class ParticipantEnv(gym.Env):
                         self.robot.STARTUP_DELAY_MIN, self.robot.STARTUP_DELAY_MAX
                     )
                 )
-
-            with self.robot._thread_mutex:
-                if self.robot.step(self.robot.time_step) == -1:
-                    sys.exit(0)
 
         return self.robot.get_observations()
 

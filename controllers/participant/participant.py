@@ -373,7 +373,7 @@ class SpaceBot(Robot):
                     self._is_action_being_replayed = 0.0
                 # Then, just walk forward slowly (if not replaying a motion)
                 if self._is_action_being_replayed == 0.0:
-                    self.gait_controller.set_step_amplitude(0.5)
+                    self.gait_controller.set_step_amplitude(1.0)
                     self.gait_controller.command_to_motors(
                         desired_radius=self.TURNING_RADIUS_STRAIGHT,
                         heading_angle=0.0,
@@ -558,19 +558,17 @@ class SpaceBot(Robot):
             return 0.0, False
 
     def reset(self):
-        self.is_resetting = True
-
-        self.rolling_average_acceleration_xy.reset()
-
-        if self.action_use_combined_scheme:
-            self.gait_controller.reset()
-            self._is_action_being_replayed = 0.0
-            self._is_agent_ready = False
-            self._is_agent_ready_stance_taken = False
-
         if self.is_training:
+            self.is_resetting = True
             self.trainer.reset()
+            self.rolling_average_acceleration_xy.reset()
             self.replay_controller.stop_current_motion()
+
+            if self.action_use_combined_scheme:
+                self.gait_controller.reset()
+                self._is_action_being_replayed = 0.0
+                self._is_agent_ready = False
+                self._is_agent_ready_stance_taken = False
 
     def _init_static_joints(self):
         self.__ControllerHeadPitch = ControllerHeadPitch(
@@ -985,24 +983,25 @@ class ParticipantEnv(gym.Env):
         return obs, reward, is_done, info
 
     def reset(self):
-        with self.robot._thread_mutex:
-            if not self.__is_first_reset_done:
-                self.__is_first_reset_done = True
-            else:
-                self.robot.reset()
+        if self.robot.is_training:
+            with self.robot._thread_mutex:
+                if not self.__is_first_reset_done:
+                    self.__is_first_reset_done = True
+                else:
+                    self.robot.reset()
 
-        if self.robot.is_training and self.robot.EMULATE_STARTUP_DELAY_DURING_TRAINING:
-            time.sleep(
-                np.random.uniform(
-                    self.robot.STARTUP_DELAY_MIN, self.robot.STARTUP_DELAY_MAX
+            if self.robot.EMULATE_STARTUP_DELAY_DURING_TRAINING:
+                time.sleep(
+                    np.random.uniform(
+                        self.robot.STARTUP_DELAY_MIN, self.robot.STARTUP_DELAY_MAX
+                    )
                 )
-            )
 
-        with self.robot._thread_mutex:
-            if self.robot.step(self.robot.time_step) == -1:
-                sys.exit(0)
+            with self.robot._thread_mutex:
+                if self.robot.step(self.robot.time_step) == -1:
+                    sys.exit(0)
 
-            return self.robot.get_observations()
+        return self.robot.get_observations()
 
     def render(self, mode="human"):
         if mode == "human":
@@ -1207,6 +1206,8 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             _time_before = time.time()
             driver._step(policy, 0, 0)
             print(f"{time.time() - _time_before:.3f}", flush=True)
+
+        print(__get_cmd_stdout(["nvidia-smi"]))
 
         while True:
             driver._step(policy, 0, 0)

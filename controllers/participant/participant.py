@@ -1092,8 +1092,8 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             "jax.prealloc": train,
             "run.steps": 1e8,
             "run.log_every": 600,
-            "run.train_ratio": 1024,
-            "batch_size": 32,
+            "run.train_ratio": 256,
+            "batch_size": 16,
             "batch_length": 64,
             "imag_horizon": 15,
             # rssm
@@ -1105,29 +1105,29 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             "encoder.mlp_keys": "vector",
             "encoder.cnn_keys": "image",
             "encoder.mlp_layers": 2,
-            "encoder.mlp_units": 256,
+            "encoder.mlp_units": 512,
             "encoder.cnn_depth": 16,
             "encoder.minres": 6,
             "decoder.mlp_keys": "vector",
             "decoder.cnn_keys": "image",
             "decoder.mlp_layers": 2,
-            "decoder.mlp_units": 256,
+            "decoder.mlp_units": 512,
             "decoder.cnn_depth": 16,
             "decoder.minres": 6,
             # actor/critic
             "actor.layers": 2,
-            "actor.units": 256,
+            "actor.units": 1024,
             "critic.layers": 2,
-            "critic.units": 512,
+            "critic.units": 1024,
             # reward
             "reward_head.layers": 2,
             "reward_head.units": 512,
             # cont
             "cont_head.layers": 2,
-            "cont_head.units": 512,
+            "cont_head.units": 256,
             # disag
             "disag_head.layers": 2,
-            "disag_head.units": 512,
+            "disag_head.units": 256,
         }
     )
     if not train:
@@ -1136,7 +1136,7 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
                 "run.from_checkpoint": os.path.join(
                     os.path.abspath(os.path.dirname(__file__)),
                     "models",
-                    "model02.ckpt",
+                    "model03.ckpt",
                 ),
             }
         )

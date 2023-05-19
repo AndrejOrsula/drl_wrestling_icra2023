@@ -1203,10 +1203,13 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
         print(time.time() - _time_start)
         print(__get_cmd_stdout(["nvidia-smi"]))
 
-        while True:
+        for _ in range(10):
             _time_before = time.time()
             driver._step(policy, 0, 0)
             print(f"{time.time() - _time_before:.3f}", flush=True)
+
+        while True:
+            driver._step(policy, 0, 0)
 
 
 if __name__ == "__main__":

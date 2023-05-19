@@ -21,6 +21,7 @@ ENV NVIDIA_VISIBLE_DEVICES="all"
 ENV NVIDIA_DRIVER_CAPABILITIES="all"
 
 # Prepares the controller of the participant via the setup.bash script
+ARG MODELS_VERSION=0.3.0
 COPY .docker/scripts/setup.bash /usr/local/webots-project/controllers/.docker/scripts/setup.bash
 RUN /usr/local/webots-project/controllers/.docker/scripts/setup.bash
 

@@ -25,7 +25,7 @@ COPY .docker/scripts/setup.bash /usr/local/webots-project/controllers/.docker/sc
 RUN /usr/local/webots-project/controllers/.docker/scripts/setup.bash
 
 # Downloads trained models
-ARG MODELS_VERSION=0.3.2
+ARG MODELS_VERSION=0.3.3
 COPY .docker/scripts/download_models.bash /usr/local/webots-project/controllers/.docker/scripts/download_models.bash
 RUN /usr/local/webots-project/controllers/.docker/scripts/download_models.bash
 

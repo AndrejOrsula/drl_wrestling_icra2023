@@ -30,6 +30,8 @@ if os.environ.get("CI"):
     RANDOM_AGENT = False
     DEBUG: bool = False
 
+INFERENCE_MODEL_NAME: str = "model03.ckpt"
+
 
 class SpaceBot(Robot):
     MAX_TURNING_RADIUS: float = 2.0
@@ -1055,6 +1057,8 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
     # Begin with creating the environment to start before taking the time to import dreamerv3
     env = ParticipantEnv(train=train, **kwargs)
 
+    from copy import deepcopy
+
     import dreamerv3
     from dreamerv3 import embodied
     from embodied.envs import from_gym
@@ -1135,32 +1139,22 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             "disag_head.units": 256,
         }
     )
-    if not train:
-        config = config.update(
-            {
-                "run.from_checkpoint": os.path.join(
-                    os.path.abspath(os.path.dirname(__file__)),
-                    "models",
-                    "model03.ckpt",
-                ),
-            }
-        )
-
-    config = embodied.Flags(config).parse()
-    logdir = embodied.Path(config.logdir)
-    step = embodied.Counter()
-
-    env = from_gym.FromGym(env, obs_key="vector")
-    env = dreamerv3.wrap_env(env, config)
-    env = embodied.BatchEnv([env], parallel=False)
-    agent = dreamerv3.Agent(env.obs_space, env.act_space, step, config)
-    args = embodied.Config(
-        **config.run,
-        logdir=config.logdir,
-        batch_steps=config.batch_size * config.batch_length,
-    )
 
     if train:
+        config = embodied.Flags(config).parse()
+        logdir = embodied.Path(config.logdir)
+        step = embodied.Counter()
+
+        env = from_gym.FromGym(env, obs_key="vector")
+        env = dreamerv3.wrap_env(env, config)
+        env = embodied.BatchEnv([env], parallel=False)
+        agent = dreamerv3.Agent(env.obs_space, env.act_space, step, config)
+        args = embodied.Config(
+            **config.run,
+            logdir=config.logdir,
+            batch_steps=config.batch_size * config.batch_length,
+        )
+
         replay = embodied.replay.Uniform(
             config.batch_length, config.replay_size, logdir / "replay"
         )
@@ -1175,26 +1169,97 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             ],
         )
         embodied.run.train(agent, env, replay, logger, args)
+
     else:
-        driver = embodied.Driver(env)
-        checkpoint = embodied.Checkpoint()
-        checkpoint.agent = agent
-        checkpoint.load(args.from_checkpoint, keys=["agent"])
-        policy = lambda *args: agent.policy(*args, mode="eval")
+        config = config.update(
+            {
+                "run.from_checkpoint": os.path.join(
+                    os.path.abspath(os.path.dirname(__file__)),
+                    "models",
+                    INFERENCE_MODEL_NAME,
+                ),
+            }
+        )
+        config_copy = deepcopy(config)
+        env_copy = env
 
-        # TODO: Remove debug time prints
-        print(time.time() - _time_start)
-        print(__get_cmd_stdout(["nvidia-smi"]))
+        try:
+            config = embodied.Flags(config).parse()
+            step = embodied.Counter()
 
-        for _ in range(10):
-            _time_before = time.time()
-            driver._step(policy, 0, 0)
-            print(f"{time.time() - _time_before:.3f}", flush=True)
+            env = from_gym.FromGym(env, obs_key="vector")
+            env = dreamerv3.wrap_env(env, config)
+            env = embodied.BatchEnv([env], parallel=False)
+            agent = dreamerv3.Agent(env.obs_space, env.act_space, step, config)
+            args = embodied.Config(
+                **config.run,
+                logdir=config.logdir,
+                batch_steps=config.batch_size * config.batch_length,
+            )
 
-        print(__get_cmd_stdout(["nvidia-smi"]))
+            driver = embodied.Driver(env)
+            checkpoint = embodied.Checkpoint()
+            checkpoint.agent = agent
+            checkpoint.load(args.from_checkpoint, keys=["agent"])
+            policy = lambda *args: agent.policy(*args, mode="eval")
 
-        while True:
-            driver._step(policy, 0, 0)
+            # TODO: Remove debug time prints
+            print(time.time() - _time_start)
+            print(__get_cmd_stdout(["nvidia-smi"]))
+
+            for _ in range(10):
+                _time_before = time.time()
+                driver._step(policy, 0, 0)
+                print(f"{time.time() - _time_before:.3f}", flush=True)
+
+            print(__get_cmd_stdout(["nvidia-smi"]))
+
+            while True:
+                driver._step(policy, 0, 0)
+
+        except Exception:
+            print("GPU-accelerated inference failed. Falling back to CPU.")
+            _time_start_cpu = time.time()
+
+            env = env_copy
+            env.robot._is_agent_ready = False
+
+            config = config_copy
+            config = config.update(
+                {
+                    "jax.platform": "cpu",
+                }
+            )
+
+            config = embodied.Flags(config).parse()
+            step = embodied.Counter()
+
+            env = from_gym.FromGym(env, obs_key="vector")
+            env = dreamerv3.wrap_env(env, config)
+            env = embodied.BatchEnv([env], parallel=False)
+            agent = dreamerv3.Agent(env.obs_space, env.act_space, step, config)
+            args = embodied.Config(
+                **config.run,
+                logdir=config.logdir,
+                batch_steps=config.batch_size * config.batch_length,
+            )
+
+            driver = embodied.Driver(env)
+            checkpoint = embodied.Checkpoint()
+            checkpoint.agent = agent
+            checkpoint.load(args.from_checkpoint, keys=["agent"])
+            policy = lambda *args: agent.policy(*args, mode="eval")
+
+            # TODO: Remove debug time prints
+            print(time.time() - _time_start_cpu)
+
+            for _ in range(10):
+                _time_before = time.time()
+                driver._step(policy, 0, 0)
+                print(f"{time.time() - _time_before:.3f}", flush=True)
+
+            while True:
+                driver._step(policy, 0, 0)
 
 
 if __name__ == "__main__":

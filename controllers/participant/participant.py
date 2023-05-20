@@ -364,7 +364,7 @@ class SpaceBot(Robot):
                     self._is_action_being_replayed = 0.0
                 # Then, just walk forward slowly (if not replaying a motion)
                 if self._is_action_being_replayed == 0.0:
-                    self.gait_controller.set_step_amplitude(1.08)
+                    self.gait_controller.set_step_amplitude(1.0)
                     self.gait_controller.command_to_motors(
                         desired_radius=self.TURNING_RADIUS_STRAIGHT,
                         heading_angle=0.0,

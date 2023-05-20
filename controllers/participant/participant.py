@@ -547,16 +547,17 @@ class SpaceBot(Robot):
             return 0.0, False
 
     def reset(self):
+        self.rolling_average_acceleration_xy.reset()
+
+        if self.action_use_combined_scheme:
+            self.gait_controller.reset()
+            self.replay_controller.stop_current_motion()
+            self._is_action_being_replayed = 0.0
+            self._is_agent_ready = False
+            self._is_agent_ready_stance_taken = False
+
         if self.is_training:
             self.trainer.reset()
-            self.rolling_average_acceleration_xy.reset()
-            self.replay_controller.stop_current_motion()
-
-            if self.action_use_combined_scheme:
-                self.gait_controller.reset()
-                self._is_action_being_replayed = 0.0
-                self._is_agent_ready = False
-                self._is_agent_ready_stance_taken = False
 
     def _init_static_joints(self):
         self.__ControllerHeadPitch = ControllerHeadPitch(
@@ -979,6 +980,10 @@ class ParticipantEnv(gym.Env):
                         self.robot.STARTUP_DELAY_MIN, self.robot.STARTUP_DELAY_MAX
                     )
                 )
+
+            with self.robot._thread_mutex:
+                if self.robot.step(self.robot.time_step) == -1:
+                    sys.exit(0)
 
         return self.robot.get_observations()
 

@@ -1052,8 +1052,6 @@ def __get_cmd_stdout(cmd) -> str:
 
 
 def dreamerv3(train: bool = TRAIN, **kwargs):
-    _time_start = time.time()
-
     # Begin with creating the environment to start before taking the time to import dreamerv3
     env = ParticipantEnv(train=train, **kwargs)
 
@@ -1200,24 +1198,11 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             checkpoint.load(args.from_checkpoint, keys=["agent"])
             policy = lambda *args: agent.policy(*args, mode="eval")
 
-            # TODO: Remove debug time prints
-            print(time.time() - _time_start)
-            print(__get_cmd_stdout(["nvidia-smi"]))
-
-            for _ in range(10):
-                _time_before = time.time()
-                driver._step(policy, 0, 0)
-                print(f"{time.time() - _time_before:.3f}", flush=True)
-
-            print(__get_cmd_stdout(["nvidia-smi"]))
-
             while True:
                 driver._step(policy, 0, 0)
 
         except Exception:
             print("GPU-accelerated inference failed. Falling back to CPU.")
-            _time_start_cpu = time.time()
-
             env = env_copy
             env.robot._is_agent_ready = False
 
@@ -1247,20 +1232,12 @@ def dreamerv3(train: bool = TRAIN, **kwargs):
             checkpoint.load(args.from_checkpoint, keys=["agent"])
             policy = lambda *args: agent.policy(*args, mode="eval")
 
-            # TODO: Remove debug time prints
-            print(time.time() - _time_start_cpu)
-
-            for _ in range(10):
-                _time_before = time.time()
-                driver._step(policy, 0, 0)
-                print(f"{time.time() - _time_before:.3f}", flush=True)
-
             while True:
                 driver._step(policy, 0, 0)
 
 
 if __name__ == "__main__":
-    print(__get_cmd_stdout(["nvidia-smi"]))
+    # print(__get_cmd_stdout(["nvidia-smi"]))
 
     if RANDOM_AGENT:
         wrestler = ParticipantEnv(train=TRAIN)

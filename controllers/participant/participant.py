@@ -80,12 +80,12 @@ class SpaceBot(Robot):
         train: bool = TRAIN,
         reward_for_each_step_standing: float = 1.0,
         reward_knockout_trainee: float = 50.0,
-        reward_knockout_opponent: float = 1.0,
-        reward_knockout_opponent_without_trainee_knockout: float = 20.0,
+        reward_knockout_opponent: float = 2.5,
+        reward_knockout_opponent_without_trainee_knockout: float = 40.0,
         max_distance_knockout_opponent: float = 0.8,
-        reward_distance_from_centre: float = 1.0,
+        reward_distance_from_centre: float = 0.05,
         reward_coverage_delta_trainee: float = 40.0,
-        reward_coverage_total_trainee: float = 1.0,
+        reward_coverage_total_trainee: float = 5.0,
         reward_coverage_delta_opponent: float = 1.0,
     ):
         super().__init__()
